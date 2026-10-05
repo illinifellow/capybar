@@ -1,0 +1,30 @@
+name: Bug report
+description: Something capybar shows or does wrong
+title: "bug: "
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happens
+      description: What you saw, where on the screen, and a screenshot if it shows the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What should happen
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. With capybar running …
+        2. Click …
+  - type: input
+    id: terminal
+    attributes:
+      label: macOS version and Mac
+      placeholder: macOS 15.4 on an M2
