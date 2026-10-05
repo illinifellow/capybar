@@ -1,27 +1,15 @@
-<div align="center">
-
 # capybar
 
 **A capybara and her retinue in the macOS menu bar: CPU and memory, network throughput, ping and Wi-Fi, and the microphone.**
 
-[![CI](https://github.com/illinifellow/capybar/actions/workflows/ci.yml/badge.svg)](https://github.com/illinifellow/capybar/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-ff905c.svg)](LICENSE)
-[![macOS](https://img.shields.io/badge/macOS-14%2B-88bd66.svg)](https://www.apple.com/macos/)
+[![CI](https://img.shields.io/github/actions/workflow/status/illinifellow/capybar/ci.yml?label=CI)](https://github.com/illinifellow/capybar/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-ff905c)](LICENSE)
+[![macOS](https://img.shields.io/badge/macOS-14%2B-88bd66)](https://www.apple.com/macos/)
 [![Buy me a coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-ffdd04?logo=buymeacoffee&logoColor=000)](https://buymeacoffee.com/illinifellow)
 
+![The household in the menu bar, enlarged: CPU and memory, upload and download, ping and Wi-Fi, the capybara with her apple, and the muted microphone](docs/menubar.png)
+
 *Being a Brief and Respectful Account of a Small Rodent of Quality, Lately Elevated to the macOS Menu Bar, Together with Such Instruments of Measurement as Befit Her Retinue.*
-
-</div>
-
-## Contents
-
-- [I. Of the Establishment, and Why It Exists at All](#i-of-the-establishment-and-why-it-exists-at-all)
-- [II. Of Installation, Which Requires No Great Talent](#ii-of-installation-which-requires-no-great-talent)
-- [III. Of Certain Services Rendered Without Ceremony](#iii-of-certain-services-rendered-without-ceremony)
-- [IV. Of Instructions Given from the Command Line](#iv-of-instructions-given-from-the-command-line)
-- [V. Of the Arrangement of the Sources](#v-of-the-arrangement-of-the-sources)
-- [VI. Of Improvements, and the Proper Manner of Proposing Them](#vi-of-improvements-and-the-proper-manner-of-proposing-them)
-- [VII. Of Licence](#vii-of-licence)
 
 ## I. Of the Establishment, and Why It Exists at All
 
@@ -34,6 +22,8 @@ From left to right, the capybara keeping the place of honour at the far end:
 3. **The Ping**: the round-trip time to `8.8.8.8` above, the quality of the Wi-Fi signal in percent below (−100 dBm counting as 0%, −50 dBm and better as 100%), both taken once a second. Should Google decline to reply, or reply with a tardiness exceeding 150 ms, the upper figure is rendered in red, as one might raise an eyebrow at a footman who arrives late with the tea; the lower turns red when the quality sinks beneath 50% or the Wi-Fi has absented itself altogether.
 4. **The Capybara**, who no longer queues among the others but sits in a borderless panel laid over the menu bar's Control Center icon, which she conceals and whose movements she follows; she walks, chews grass, reclines with her head raised to survey her estate with a red apple balanced upon it, sleeps while releasing a modest procession of *z*s, stands with dignity in the rain, and swims, the apple still in place. Eight frames a second; she is not to be hurried. She is, moreover, a creature of service: a left click upon her summons the iTerm2 session in which Claude Code is already at work, or, finding none so engaged, opens a fresh window and issues the command `cc` on your behalf; a right click offers the *Quit* entry. The first such summons obliges macOS to ask whether `capybar` may direct iTerm2, a question one answers *Allow*, unless one prefers the life of a lighthouse keeper, whose only correspondent is the sea.
 5. **The Microphone**: a microphone, crossed out and red when the default input device is muted. Only the keyboard's own microphone key changes that state; capybar remaps the key to F5 with `hidutil` (so macOS no longer pesters one about Dictation), catches it, and puts the device back at once should any application or system whim presume to alter the state the key last chose. At every start, wake and unlock the microphone is muted; only the key may unmute it. Each press of the key toggles the microphone, on or off.
+
+<img data-cover alt="The capybara in every one of her occupations: walking, chewing grass, reclining with the apple, sleeping, standing in the rain and swimming" src="docs/pattern.png" />
 
 ## II. Of Installation, Which Requires No Great Talent
 
