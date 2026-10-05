@@ -7,6 +7,7 @@
 [![CI](https://github.com/illinifellow/capybar/actions/workflows/ci.yml/badge.svg)](https://github.com/illinifellow/capybar/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-ff905c.svg)](LICENSE)
 [![macOS](https://img.shields.io/badge/macOS-14%2B-88bd66.svg)](https://www.apple.com/macos/)
+[![Buy me a coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-ffdd04?logo=buymeacoffee&logoColor=000)](https://buymeacoffee.com/illinifellow)
 
 *Being a Brief and Respectful Account of a Small Rodent of Quality, Lately Elevated to the macOS Menu Bar, Together with Such Instruments of Measurement as Befit Her Retinue.*
 
