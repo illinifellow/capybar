@@ -7,7 +7,7 @@
 [![macOS](https://img.shields.io/badge/macOS-14%2B-88bd66)](https://www.apple.com/macos/)
 [![Buy me a coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-ffdd04?logo=buymeacoffee&logoColor=000)](https://buymeacoffee.com/illinifellow)
 
-![The household in the menu bar, enlarged: CPU and memory, upload and download, ping and Wi-Fi, the capybara with her apple, and the muted microphone](docs/menubar.png)
+![capybar in the macOS menu bar, enlarged three times: CPU and memory, upload and download, ping and Wi-Fi quality, the muted microphone among the system icons, and the capybara beside the clock](docs/menubar.png)
 
 *Being a Brief and Respectful Account of a Small Rodent of Quality, Lately Elevated to the macOS Menu Bar, Together with Such Instruments of Measurement as Befit Her Retinue.*
 
@@ -22,8 +22,6 @@ From left to right, the capybara keeping the place of honour at the far end:
 3. **The Ping**: the round-trip time to `8.8.8.8` above, the quality of the Wi-Fi signal in percent below (−100 dBm counting as 0%, −50 dBm and better as 100%), both taken once a second. Should Google decline to reply, or reply with a tardiness exceeding 150 ms, the upper figure is rendered in red, as one might raise an eyebrow at a footman who arrives late with the tea; the lower turns red when the quality sinks beneath 50% or the Wi-Fi has absented itself altogether.
 4. **The Capybara**, who no longer queues among the others but sits in a borderless panel laid over the menu bar's Control Center icon, which she conceals and whose movements she follows; she walks, chews grass, reclines with her head raised to survey her estate with a red apple balanced upon it, sleeps while releasing a modest procession of *z*s, stands with dignity in the rain, and swims, the apple still in place. Eight frames a second; she is not to be hurried. She is, moreover, a creature of service: a left click upon her summons the iTerm2 session in which Claude Code is already at work, or, finding none so engaged, opens a fresh window and issues the command `cc` on your behalf; a right click offers the *Quit* entry. The first such summons obliges macOS to ask whether `capybar` may direct iTerm2, a question one answers *Allow*, unless one prefers the life of a lighthouse keeper, whose only correspondent is the sea.
 5. **The Microphone**: a microphone, crossed out and red when the default input device is muted. Only the keyboard's own microphone key changes that state; capybar remaps the key to F5 with `hidutil` (so macOS no longer pesters one about Dictation), catches it, and puts the device back at once should any application or system whim presume to alter the state the key last chose. At every start, wake and unlock the microphone is muted; only the key may unmute it. Each press of the key toggles the microphone, on or off.
-
-<img data-cover alt="The capybara in every one of her occupations: walking, chewing grass, reclining with the apple, sleeping, standing in the rain and swimming" src="docs/pattern.png" />
 
 ## II. Of Installation, Which Requires No Great Talent
 
@@ -89,3 +87,5 @@ swiftc -O Sources/*.swift -o .build/capybar
 ## VII. Of Licence
 
 MIT. You may do with it very nearly as you please, provided you do not mistake the capybara for a hippopotamus in polite company.
+
+<img data-cover alt="capybar as an isometric line drawing: the menu bar with its readouts and the capybara standing on it with an apple on her head" src="docs/cover.png" />
