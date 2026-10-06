@@ -1,6 +1,6 @@
 # capybar
 
-<!-- cover: docs/cover.png -->
+<!-- date: 2026-10-06T02:00:00Z -->
 
 **A capybara and her retinue in the macOS menu bar: CPU and memory, network throughput, ping and Wi-Fi, and the microphone.**
 
