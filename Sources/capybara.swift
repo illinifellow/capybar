@@ -1,6 +1,12 @@
-/// Animated capybara item: walks, chews grass, lies looking around with an apple on its
-/// head, sleeps letting out "z"s, stands in the rain, swims. Colours follow the menu bar's
-/// appearance; the apple stays red, water stays blue. 8 frames per second.
+/// The animated capybara: walks, chews grass, lies looking around with an apple on its head,
+/// sleeps letting out "z"s, stands in the rain, swims. Colours follow the menu bar's appearance;
+/// the apple stays red, water stays blue. FRAMES_PER_SECOND frames a second.
+///
+/// She lives in a borderless panel laid over the menu bar's Control Center icon, which she covers
+/// and follows. That icon is a window of Control Center (bundle CONTROL_CENTER_BUNDLE_IDENTIFIER)
+/// named CONTROL_CENTER_ICON_WINDOW, and macOS reveals other programs' window names only with the
+/// Screen Recording permission; without it she lives in an ordinary status item instead. A left
+/// click brings Claude Code forward (`claudecode.swift`), a right click shows Quit.
 import AppKit
 
 private let ITEM_SIZE = NSSize(width: 30, height: 18)
@@ -35,7 +41,7 @@ private struct Pose {
 /// @param pose What to draw.
 /// @param foreground Colour of the capybara, grass and "z"s; the menu bar's label colour.
 /// @returns A non-template NSImage of ITEM_SIZE (the apple and water keep their colours).
-private func makeImage(_ pose: Pose, foreground: NSColor) -> NSImage {
+@MainActor private func makeImage(_ pose: Pose, foreground: NSColor) -> NSImage {
     NSImage(size: ITEM_SIZE, flipped: false) { _ in
         let frame = Double(pose.frame)
         let isLying = [.lookAround, .sleep].contains(pose.activity)
@@ -153,74 +159,7 @@ private func advance(_ pose: inout Pose) {
     }
 }
 
-
-/// Brings the iTerm2 session running Claude Code to the front, or opens a new iTerm2 window
-/// running `cc` when no session runs `claude`. A session counts when a `claude` process
-/// lives on its terminal.
-func focusClaudeCode() {
-    let ttys = runAppleScript("""
-        if application "iTerm" is not running then return ""
-        tell application "iTerm" to return tty of sessions of tabs of windows
-        """)?.filter { !$0.isEmpty } ?? []
-    let claudeTty = ttys.first { tty in
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/ps")
-        process.arguments = ["-t", tty.replacingOccurrences(of: "/dev/", with: ""), "-o", "comm="]
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        guard (try? process.run()) != nil else { return false }
-        process.waitUntilExit()
-        return String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-            .split(separator: "\n").contains { $0.hasSuffix("claude") }
-    }
-    if let claudeTty {
-        _ = runAppleScript("""
-            tell application "iTerm"
-                activate
-                repeat with candidateWindow in windows
-                    repeat with candidateTab in tabs of candidateWindow
-                        repeat with candidateSession in sessions of candidateTab
-                            if tty of candidateSession is "\(claudeTty)" then
-                                select candidateWindow
-                                tell candidateTab to select
-                                tell candidateSession to select
-                                return
-                            end if
-                        end repeat
-                    end repeat
-                end repeat
-            end tell
-            """)
-    } else {
-        _ = runAppleScript("""
-            tell application "iTerm"
-                activate
-                set claudeWindow to (create window with default profile)
-                tell current session of claudeWindow to write text "cc"
-            end tell
-            """)
-    }
-}
-
-/// Runs AppleScript source; a failure is printed to stderr with the script's error.
-/// @param source The script.
-/// @returns Every text value of the result, nested lists flattened; nil on failure.
-private func runAppleScript(_ source: String) -> [String]? {
-    var error: NSDictionary?
-    guard let result = NSAppleScript(source: source)?.executeAndReturnError(&error) else {
-        FileHandle.standardError.write("AppleScript failed: \(error ?? [:])\n".data(using: .utf8)!)
-        return nil
-    }
-    func flatten(_ descriptor: NSAppleEventDescriptor) -> [String] {
-        descriptor.numberOfItems > 0
-            ? (1...descriptor.numberOfItems).flatMap { descriptor.atIndex($0).map(flatten) ?? [] }
-            : descriptor.stringValue.map { [$0] } ?? []
-    }
-    return flatten(result)
-}
-
-/// The view the capybara lives in: draws each frame and answers clicks (left focuses Claude
-/// Code in iTerm2, right shows Quit).
+/// The view the capybara lives in inside the panel: draws each frame and answers clicks.
 private final class CapybaraView: NSView {
     var image: NSImage? { didSet { needsDisplay = true } }
     private let quitMenu = makeQuitMenu()
@@ -231,69 +170,115 @@ private final class CapybaraView: NSView {
                               width: image.size.width, height: image.size.height))
     }
 
-    override func mouseUp(with event: NSEvent) { focusClaudeCode() }
+    override func mouseUp(with event: NSEvent) { requestClaudeCodeFocus() }
     override func rightMouseUp(with event: NSEvent) { NSMenu.popUpContextMenu(quitMenu, with: event, for: self) }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
 
-private let CONTROL_CENTER_OWNER = "Control Center"
-private let CONTROL_CENTER_ICON = "BentoBox"
-private var capybaraWindow: NSPanel?
+/// Receives clicks on the status item the capybara uses without Screen Recording.
+@MainActor private final class CapybaraItemTarget: NSObject {
+    private let quitMenu = makeQuitMenu()
 
-/// Finds the Control Center icon in the menu bar.
-/// @returns Its frame in Cocoa screen coordinates, or nil when it is not on screen.
-private func controlCenterIconFrame() -> NSRect? {
-    guard let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]],
-          let icon = windows.first(where: { ($0[kCGWindowOwnerName as String] as? String) == CONTROL_CENTER_OWNER && ($0[kCGWindowName as String] as? String) == CONTROL_CENTER_ICON }),
-          let bounds = icon[kCGWindowBounds as String] as? [String: CGFloat],
-          let x = bounds["X"], let y = bounds["Y"], let width = bounds["Width"], let height = bounds["Height"],
-          let primary = NSScreen.screens.first else { return nil }
-    return NSRect(x: x, y: primary.frame.maxY - y - height, width: width, height: height)
-}
-
-/// Moves the capybara window over the Control Center icon, or hides it when the icon is absent.
-private func placeCapybaraWindow() {
-    guard let window = capybaraWindow else { return }
-    if let frame = controlCenterIconFrame() {
-        if window.frame != frame { window.setFrame(frame, display: true) }
-        window.orderFrontRegardless()
-    } else {
-        window.orderOut(nil)
+    @objc func clicked(_ sender: NSStatusBarButton) {
+        guard let event = NSApp.currentEvent else { return }
+        if event.type == .rightMouseUp { NSMenu.popUpContextMenu(quitMenu, with: event, for: sender) } else { requestClaudeCodeFocus() }
     }
 }
 
-/// Puts the animated capybara in a borderless panel above the menu bar's Control Center icon,
-/// covering it; the panel follows the icon when menu bar items move. A left click brings Claude
-/// Code forward in iTerm2, a right click shows Quit.
-func startCapybara() {
-    let panel = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-    panel.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.statusWindow)) + 1)
-    panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
-    panel.isOpaque = false
-    panel.backgroundColor = .clear
-    panel.hasShadow = false
-    // The menu bar here is drawn near-solid; a fill of its measured colour (sRGB 4, 3, 4 in dark
-    // mode, measured 2026-10-04) hides the icon without a visible plate.
-    let background = NSView()
-    background.wantsLayer = true
-    let view = CapybaraView()
-    view.autoresizingMask = [.width, .height]
-    background.addSubview(view)
-    panel.contentView = background
-    capybaraWindow = panel
-    placeCapybaraWindow()
-    view.frame = background.bounds
-    Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in placeCapybaraWindow() }
-    var pose = Pose()
-    Timer.scheduledTimer(withTimeInterval: 1 / FRAMES_PER_SECOND, repeats: true) { _ in
-        // Nothing is drawn while the panel cannot be seen: screen locked or asleep, menu bar hidden.
-        guard panel.occlusionState.contains(.visible) else { return }
-        var foreground = NSColor.labelColor
-        view.effectiveAppearance.performAsCurrentDrawingAppearance { foreground = NSColor.labelColor.usingColorSpace(.deviceRGB) ?? .labelColor }
-        let isDark = view.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-        let fill = (isDark ? NSColor(srgbRed: 4 / 255, green: 3 / 255, blue: 4 / 255, alpha: 1) : NSColor.white).cgColor
-        if background.layer?.backgroundColor != fill { background.layer?.backgroundColor = fill }
-        view.image = makeImage(pose, foreground: foreground)
+private let CONTROL_CENTER_BUNDLE_IDENTIFIER = "com.apple.controlcenter"
+private let CONTROL_CENTER_ICON_WINDOW = "BentoBox"
+private let PLACEMENT_REFRESH_SECONDS = 1.0
+private let CAPYBARA_AUTOSAVE_NAME = "capybarCapybara"
+/// The panel's fill, which hides the Control Center icon under it. No public API exposes the
+/// menu bar's tint; these are its colours measured on an opaque menu bar (dark: sRGB 4, 3, 4,
+/// 2026-10-04), so on a translucent one the panel shows as a faint plate.
+private let DARK_MENU_BAR_FILL = NSColor(srgbRed: 4 / 255, green: 3 / 255, blue: 4 / 255, alpha: 1)
+private let LIGHT_MENU_BAR_FILL = NSColor.white
+
+/// Finds the Control Center icon in the menu bar.
+/// @returns Its frame in Cocoa screen coordinates, or nil when it is not on screen.
+@MainActor private func controlCenterIconFrame() -> NSRect? {
+    let owners = Set(NSRunningApplication.runningApplications(withBundleIdentifier: CONTROL_CENTER_BUNDLE_IDENTIFIER).map(\.processIdentifier))
+    guard !owners.isEmpty, let primary = NSScreen.screens.first,
+          let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]],
+          let icon = windows.first(where: { ($0[kCGWindowOwnerPID as String] as? pid_t).map(owners.contains) == true && $0[kCGWindowName as String] as? String == CONTROL_CENTER_ICON_WINDOW }),
+          let boundsDictionary = icon[kCGWindowBounds as String] as? NSDictionary,
+          let bounds = CGRect(dictionaryRepresentation: boundsDictionary) else { return nil }
+    return NSRect(x: bounds.minX, y: primary.frame.maxY - bounds.maxY, width: bounds.width, height: bounds.height)
+}
+
+/// Shows the capybara over the Control Center icon, or in a status item of her own when the
+/// icon cannot be found by name, and draws her frames.
+@MainActor private final class CapybaraStage {
+    private var pose = Pose()
+    private let panel: NSPanel?
+    private let panelView = CapybaraView()
+    private let background = NSView()
+    private var item: NSStatusItem?
+    private let itemTarget = CapybaraItemTarget()
+
+    /// @param overControlCenter True to live over the Control Center icon (needs Screen Recording), false for a status item.
+    init(overControlCenter: Bool) {
+        guard overControlCenter else {
+            panel = nil
+            let item = NSStatusBar.system.statusItem(withLength: ITEM_SIZE.width)
+            item.autosaveName = CAPYBARA_AUTOSAVE_NAME
+            item.button?.target = itemTarget
+            item.button?.action = #selector(CapybaraItemTarget.clicked)
+            item.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
+            self.item = item
+            return
+        }
+        let panel = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        panel.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.statusWindow)) + 1)
+        panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = false
+        background.wantsLayer = true
+        panelView.autoresizingMask = [.width, .height]
+        background.addSubview(panelView)
+        panel.contentView = background
+        self.panel = panel
+        place()
+        panelView.frame = background.bounds
+        scheduleRepeatingTimer(every: PLACEMENT_REFRESH_SECONDS) { [weak self] in self?.place() }
+    }
+
+    /// Moves the panel over the Control Center icon, or hides it while the icon is absent.
+    private func place() {
+        guard let panel else { return }
+        guard let frame = controlCenterIconFrame() else {
+            logFailureOnce(key: "control center icon", "Control Center icon window \(CONTROL_CENTER_ICON_WINDOW) not found; the capybara stays hidden until it appears")
+            return panel.orderOut(nil)
+        }
+        if panel.frame != frame { panel.setFrame(frame, display: true) }
+        panel.orderFrontRegardless()
+    }
+
+    /// Draws the next frame where the capybara lives; nothing is drawn while she cannot be seen
+    /// (screen locked or asleep, menu bar hidden).
+    func drawNextFrame() {
+        if let panel {
+            guard panel.occlusionState.contains(.visible) else { return }
+            let isDark = panelView.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            let fill = (isDark ? DARK_MENU_BAR_FILL : LIGHT_MENU_BAR_FILL).cgColor
+            if background.layer?.backgroundColor != fill { background.layer?.backgroundColor = fill }
+            panelView.image = makeImage(pose, foreground: labelColor(for: panelView.effectiveAppearance))
+        } else if let button = item?.button {
+            guard button.window?.occlusionState.contains(.visible) ?? false else { return }
+            button.image = makeImage(pose, foreground: labelColor(for: button.effectiveAppearance))
+        }
         advance(&pose)
-    }.fire()
+    }
+}
+
+@MainActor private var capybaraStage: CapybaraStage?
+
+/// Puts the animated capybara in the menu bar: over the Control Center icon when capybar may
+/// read window names (Screen Recording), in a status item of her own otherwise.
+@MainActor func startCapybara() {
+    let stage = CapybaraStage(overControlCenter: CGPreflightScreenCaptureAccess())
+    capybaraStage = stage
+    scheduleRepeatingTimer(every: 1 / FRAMES_PER_SECOND) { stage.drawNextFrame() }.fire()
 }

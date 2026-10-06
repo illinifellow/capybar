@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [master]
+    tags: ["*"]
   pull_request:
 
 jobs:
@@ -10,4 +11,29 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - run: mkdir -p .build && swiftc -O Sources/*.swift -o .build/capybar
+        with:
+          fetch-depth: 0
+      - name: Build
+        run: mkdir -p .build && swiftc -O -warnings-as-errors Sources/*.swift -o .build/capybar
+      - name: Type-check in Swift 6 mode
+        run: swiftc -swift-version 6 -typecheck Sources/*.swift
+      - name: Test
+        run: swiftc $(ls Sources/*.swift | grep -v main.swift) Tests/main.swift -o .build/tests && .build/tests
+      - name: Tag matches the version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          version="$(.build/capybar --version)"
+          if [ "$version" != "$GITHUB_REF_NAME" ]; then
+            echo "tag $GITHUB_REF_NAME, but CAPYBAR_VERSION in Sources/version.swift is $version" >&2
+            exit 1
+          fi
+      - name: Release raises the version
+        if: github.event_name == 'pull_request' && github.base_ref == 'master'
+        run: |
+          version="$(.build/capybar --version)"
+          latest="$(git tag --list | grep -E '^[0-9]+(\.[0-9]+)*$' | sort -V | tail -1)"
+          newest="$(printf '%s\n%s\n' "$latest" "$version" | sort -V | tail -1)"
+          if [ -n "$latest" ] && { [ "$version" = "$latest" ] || [ "$newest" != "$version" ]; }; then
+            echo "CAPYBAR_VERSION $version is not newer than the latest tag $latest" >&2
+            exit 1
+          fi

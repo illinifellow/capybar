@@ -28,3 +28,17 @@ body:
     attributes:
       label: macOS version and Mac
       placeholder: macOS 15.4 on an M2
+  - type: input
+    id: version
+    attributes:
+      label: capybar version
+      description: "`~/.local/bin/capybar --version`"
+      placeholder: 0.2.0
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: What capybar logged
+      description: "`log show --last 1h --predicate 'subsystem == \"com.illinifellow.capybar\"'`"
+      render: text
