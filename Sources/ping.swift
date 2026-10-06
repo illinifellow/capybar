@@ -7,74 +7,83 @@
 import AppKit
 import CoreWLAN
 import SystemConfiguration
+import os
 
 private let PING_HOST = "8.8.8.8"
 private let PING_REFRESH_SECONDS = 1.0
 private let PING_TIMEOUT_SECONDS = 1.0
+private let PING_PAYLOAD_BYTES = 32
+private let PING_RECEIVE_BUFFER_BYTES = 1500
 private let PING_WINDOW_SAMPLES = 60
 private let SLOW_PING_MILLISECONDS = 150.0
 private let WEAK_SIGNAL_PERCENT = 50
+/// RSSI mapped to 0% and 100% signal quality, the usual linear scale of network tools.
+private let SIGNAL_FLOOR_DBM = -100, SIGNAL_CEILING_DBM = -50
 private let PUBLIC_ADDRESS_URL = URL(string: "https://api.ipify.org")!
 private let PUBLIC_ADDRESS_TIMEOUT_SECONDS = 3.0
 private let PUBLIC_ADDRESS_CACHE_SECONDS = 300.0
+private let PUBLIC_ADDRESS_RETRY_SECONDS = 30.0
+private let PUBLIC_ADDRESS_UNAVAILABLE = "Unavailable"
 private let TUNNEL_INTERFACE_PREFIXES = ["utun", "ipsec", "ppp", "tun", "tap", "wg"]
+private let SYSTEM_PROFILER_PATH = "/usr/sbin/system_profiler"
+private let PING_AUTOSAVE_NAME = "capybarPing"
+private let PING_WIDEST_TEXTS = ["\(Int(PING_TIMEOUT_SECONDS * 1000)) ms", "— ms", "100%", "—%"]
+private let ASKING = "Asking…"
+private let NOT_AVAILABLE = "—"
 
-/// Computes the internet checksum of an ICMP message.
-/// @param bytes The message with its checksum field zeroed. @returns The checksum.
-private func icmpChecksum(_ bytes: [UInt8]) -> UInt16 {
-    var sum: UInt32 = 0
-    for index in stride(from: 0, to: bytes.count, by: 2) {
-        sum += UInt32(bytes[index]) << 8 | (index + 1 < bytes.count ? UInt32(bytes[index + 1]) : 0)
-    }
-    while sum >> 16 != 0 { sum = (sum & 0xFFFF) + (sum >> 16) }
-    return ~UInt16(sum)
-}
+private let pingTarget: [UInt8]? = {
+    var address = in_addr()
+    guard inet_pton(AF_INET, PING_HOST, &address) == 1 else { return nil }
+    return withUnsafeBytes(of: address) { Array($0) }
+}()
+private let pingSequence = OSAllocatedUnfairLock(initialState: UInt16(0))
 
-private var pingSequence: UInt16 = 0
-
-/// Pings PING_HOST once with a PING_TIMEOUT_SECONDS timeout through an unprivileged ICMP
-/// datagram socket, so no `ping` process is started every second. Blocks while it waits.
-/// @returns Round-trip time in milliseconds, or nil when no reply arrived or the socket failed.
+/// Pings PING_HOST once through an unprivileged ICMP datagram socket, so no `ping` process is
+/// started every second; waits at most PING_TIMEOUT_SECONDS for this ping's own reply, skipping
+/// replies meant for others. Blocks while it waits.
+/// @returns Round-trip time in milliseconds; nil when no reply arrived in time or the socket failed.
 private func measurePing() -> Double? {
+    guard let target = pingTarget else { return nil }
     let descriptor = socket(AF_INET, SOCK_DGRAM, IPPROTO_ICMP)
-    guard descriptor >= 0 else { return nil }
+    guard descriptor >= 0 else {
+        logFailureOnce(key: "ping socket", "ICMP socket failed: \(String(cString: strerror(errno)))")
+        return nil
+    }
     defer { close(descriptor) }
-    var timeout = timeval(tv_sec: Int(PING_TIMEOUT_SECONDS), tv_usec: 0)
-    setsockopt(descriptor, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
     var address = sockaddr_in()
     address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
     address.sin_family = sa_family_t(AF_INET)
-    guard inet_pton(AF_INET, PING_HOST, &address.sin_addr) == 1 else { return nil }
-    pingSequence &+= 1
-    let sequence = pingSequence, identifier = UInt16(truncatingIfNeeded: getpid())
-    // Echo request: type 8, code 0, checksum, identifier, sequence, then a small payload.
-    var packet: [UInt8] = [8, 0, 0, 0, UInt8(identifier >> 8), UInt8(identifier & 0xFF), UInt8(sequence >> 8), UInt8(sequence & 0xFF)]
-        + [UInt8](repeating: 0x63, count: 32)
-    let checksum = icmpChecksum(packet)
-    packet[2] = UInt8(checksum >> 8)
-    packet[3] = UInt8(checksum & 0xFF)
+    withUnsafeMutableBytes(of: &address.sin_addr) { $0.copyBytes(from: target) }
+    let sequence = pingSequence.withLock { value in value &+= 1; return value }
+    let identifier = UInt16(truncatingIfNeeded: getpid())
+    let packet = makeEchoRequest(identifier: identifier, sequence: sequence, payloadLength: PING_PAYLOAD_BYTES)
     let start = DispatchTime.now().uptimeNanoseconds
     let sent = withUnsafePointer(to: &address) {
         $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { sendto(descriptor, packet, packet.count, 0, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) }
     }
     guard sent == packet.count else { return nil }
-    var buffer = [UInt8](repeating: 0, count: 1500)
+    var buffer = [UInt8](repeating: 0, count: PING_RECEIVE_BUFFER_BYTES)
     while true {
+        let elapsed = Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000_000
+        guard elapsed < PING_TIMEOUT_SECONDS else { return nil }
+        var timeout = socketTimeout(seconds: PING_TIMEOUT_SECONDS - elapsed)
+        guard setsockopt(descriptor, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size)) == 0 else {
+            logFailureOnce(key: "ping timeout", "ICMP receive timeout not set: \(String(cString: strerror(errno)))")
+            return nil
+        }
         let received = recv(descriptor, &buffer, buffer.count, 0)
         guard received > 0 else { return nil }
-        let elapsed = Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000
-        // Replies arrive with their IP header; its length is in the low nibble of the first byte.
-        let headerLength = Int(buffer[0] & 0x0F) * 4
-        if received >= headerLength + 8, buffer[headerLength] == 0,
-           UInt16(buffer[headerLength + 6]) << 8 | UInt16(buffer[headerLength + 7]) == sequence { return elapsed }
-        if elapsed > PING_TIMEOUT_SECONDS * 1000 { return nil }
+        if isEchoReply(buffer[..<received], from: target, identifier: identifier, sequence: sequence) {
+            let roundTrip = Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000
+            return roundTrip <= PING_TIMEOUT_SECONDS * 1000 ? roundTrip : nil
+        }
     }
 }
 
-/// Maps RSSI linearly from -100 dBm (0%) to -50 dBm (100%), the usual scale of network tools.
+/// Maps RSSI linearly from SIGNAL_FLOOR_DBM (0%) to SIGNAL_CEILING_DBM (100%).
 /// @param rssi Signal in dBm. @returns Quality 0...100.
-private func signalPercent(rssi: Int) -> Int {
-    min(max(2 * (rssi + 100), 0), 100)
+func signalPercent(rssi: Int) -> Int {
+    min(max(100 * (rssi - SIGNAL_FLOOR_DBM) / (SIGNAL_CEILING_DBM - SIGNAL_FLOOR_DBM), 0), 100)
 }
 
 /// Reads the Wi-Fi signal quality of the default interface as a percentage.
@@ -94,6 +103,10 @@ private func describe(_ mode: CWPHYMode) -> String {
     case .mode11n: return "802.11n (Wi-Fi 4)"
     case .mode11ac: return "802.11ac (Wi-Fi 5)"
     case .mode11ax: return "802.11ax (Wi-Fi 6)"
+    #if compiler(>=6.2)
+    // Wi-Fi 7 arrived in the macOS 26 SDK, which ships with Swift 6.2.
+    case .mode11be: return "802.11be (Wi-Fi 7)"
+    #endif
     case .modeNone: return "None"
     @unknown default: return "802.11 (mode \(mode.rawValue))"
     }
@@ -147,24 +160,19 @@ private func describe(_ channel: CWChannel) -> String {
 /// from a process without Location, which macOS grants only to application bundles; the system
 /// tool reads them on its own authority, in about four seconds, so it runs off the main thread.
 /// @returns (name, country code), each nil when not reported.
-private func readWiFiNameFromSystemProfiler() -> (name: String?, countryCode: String?) {
-    let process = Process()
-    process.executableURL = URL(fileURLWithPath: "/usr/sbin/system_profiler")
-    process.arguments = ["SPAirPortDataType", "-json"]
-    let pipe = Pipe()
-    process.standardOutput = pipe
-    process.standardError = FileHandle.nullDevice
-    guard (try? process.run()) != nil else { return (nil, nil) }
-    let data = pipe.fileHandleForReading.readDataToEndOfFile()
-    process.waitUntilExit()
+private func readWiFiNameFromSystemProfiler() -> ReportedWiFi {
+    let data = Data(runCommand(SYSTEM_PROFILER_PATH, ["SPAirPortDataType", "-json"]).output.utf8)
     let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
     let interfaces = ((root?["SPAirPortDataType"] as? [[String: Any]])?.first?["spairport_airport_interfaces"] as? [[String: Any]]) ?? []
     let current = interfaces.lazy.compactMap { $0["spairport_current_network_information"] as? [String: Any] }.first
-    return (current?["_name"] as? String, current?["spairport_network_country_code"] as? String)
+    return ReportedWiFi(name: current?["_name"] as? String, countryCode: current?["spairport_network_country_code"] as? String)
 }
 
 /// The network name and country code `system_profiler` reported.
-private typealias ReportedWiFi = (name: String?, countryCode: String?)
+private struct ReportedWiFi: Sendable {
+    var name: String?
+    var countryCode: String?
+}
 
 /// Reads the Wi-Fi link of the default interface through CoreWLAN.
 /// @param reported What `system_profiler` reported for the name and country code CoreWLAN
@@ -180,15 +188,15 @@ private func readWiFiRows(reported: ReportedWiFi?) -> (rows: [InfoRow], nameWith
     let ssid = interface.ssid()
     let bssid = interface.bssid()
     let macAddress = interface.hardwareAddress()
-    let networkName = ssid ?? reported.map { $0.name ?? "Unknown" } ?? "Asking…"
-    let countryCode = interface.countryCode() ?? reported.map { $0.countryCode ?? "—" } ?? (ssid == nil ? "Asking…" : "—")
+    let networkName = ssid ?? reported.map { $0.name ?? "Unknown" } ?? ASKING
+    let countryCode = interface.countryCode() ?? reported.map { $0.countryCode ?? NOT_AVAILABLE } ?? (ssid == nil ? ASKING : NOT_AVAILABLE)
     let noise = interface.noiseMeasurement()
     let rows = [
         InfoRow(label: "Network", value: networkName, copyable: ssid != nil || reported?.name != nil),
         InfoRow(label: "BSSID", value: bssid ?? "Withheld by macOS", copyable: bssid != nil),
-        InfoRow(label: "MAC", value: macAddress ?? "—", copyable: macAddress != nil),
+        InfoRow(label: "MAC", value: macAddress ?? NOT_AVAILABLE, copyable: macAddress != nil),
         InfoRow(label: "Interface", value: name),
-        InfoRow(label: "Channel", value: interface.wlanChannel().map(describe) ?? "—", copyable: true),
+        InfoRow(label: "Channel", value: interface.wlanChannel().map(describe) ?? NOT_AVAILABLE, copyable: true),
         InfoRow(label: "PHY mode", value: describe(interface.activePHYMode())),
         InfoRow(label: "Signal", value: "\(rssi) dBm (\(signalPercent(rssi: rssi))%)"),
         InfoRow(label: "Noise", value: "\(noise) dBm"),
@@ -212,7 +220,7 @@ private func numericHost(_ address: UnsafeMutablePointer<sockaddr>) -> String? {
     var host = [CChar](repeating: 0, count: Int(NI_MAXHOST))
     let length = socklen_t(address.pointee.sa_len)
     guard getnameinfo(address, length, &host, socklen_t(host.count), nil, 0, NI_NUMERICHOST) == 0 else { return nil }
-    return String(cString: host)
+    return string(fromNullTerminated: host)
 }
 
 /// Counts the leading one bits of a netmask.
@@ -247,31 +255,48 @@ private func readInterfaceAddresses() -> [String: InterfaceAddresses] {
     return byInterface
 }
 
+/// The session with the network configuration store, opened once.
+@MainActor private let DYNAMIC_STORE = SCDynamicStoreCreate(nil, BUNDLE_IDENTIFIER as CFString, nil, nil)
+
 /// Reads one dictionary from the dynamic store.
 /// @param key Store key ("State:/Network/Global/IPv4"). @returns The dictionary, nil when absent.
-private func readDynamicStore(_ key: String) -> [String: Any]? {
-    guard let store = SCDynamicStoreCreate(nil, "capybar" as CFString, nil, nil) else { return nil }
-    return SCDynamicStoreCopyValue(store, key as CFString) as? [String: Any]
+@MainActor private func readDynamicStore(_ key: String) -> [String: Any]? {
+    DYNAMIC_STORE.flatMap { SCDynamicStoreCopyValue($0, key as CFString) as? [String: Any] }
 }
 
-/// Finds the name System Settings gives a BSD interface ("Wi-Fi" for en0).
+@MainActor private var interfaceDisplayNames: [String: String] = [:]
+
+/// Finds the name System Settings gives a BSD interface ("Wi-Fi" for en0); the list of
+/// interfaces is read again only for a name not seen before.
 /// @param bsdName BSD name. @returns The display name, nil for interfaces System Settings does not list.
-private func displayName(ofInterface bsdName: String) -> String? {
-    let interfaces = SCNetworkInterfaceCopyAll() as? [SCNetworkInterface] ?? []
-    return interfaces.first { SCNetworkInterfaceGetBSDName($0) as String? == bsdName }
-        .flatMap { SCNetworkInterfaceGetLocalizedDisplayName($0) as String? }
+@MainActor private func displayName(ofInterface bsdName: String) -> String? {
+    if let known = interfaceDisplayNames[bsdName] { return known }
+    for interface in SCNetworkInterfaceCopyAll() as? [SCNetworkInterface] ?? [] {
+        if let name = SCNetworkInterfaceGetBSDName(interface) as String?, let display = SCNetworkInterfaceGetLocalizedDisplayName(interface) as String? {
+            interfaceDisplayNames[name] = display
+        }
+    }
+    return interfaceDisplayNames[bsdName]
+}
+
+/// The network configuration: its rows, and what identifies the network (answers fetched for
+/// one network are not shown on another).
+private struct NetworkState {
+    var rows: [InfoRow]
+    /// Interface, router and addresses of the default route; empty without one.
+    var identity: String
 }
 
 /// Reads the network configuration: the interface carrying the default route, its addresses,
 /// the router, the DNS servers and whether a tunnel (VPN) holds an IPv4 address.
-/// @returns The rows in display order.
-private func readNetworkRows() -> [InfoRow] {
+/// @returns The rows in display order and the network's identity.
+@MainActor private func readNetworkState() -> NetworkState {
     let global = readDynamicStore("State:/Network/Global/IPv4") ?? [:]
     let addresses = readInterfaceAddresses()
-    guard let primary = global["PrimaryInterface"] as? String else { return [InfoRow(label: "Connection", value: "No default route")] }
+    guard let primary = global["PrimaryInterface"] as? String else { return NetworkState(rows: [InfoRow(label: "Connection", value: "No default route")], identity: "") }
     /// One row per value, the label on the first only.
     func list(_ label: String, _ values: [String]) -> [InfoRow] {
-        values.isEmpty ? [InfoRow(label: label, value: "—")] : values.enumerated().map { InfoRow(label: $0.offset == 0 ? label : "", value: $0.element, copyable: true) }
+        values.isEmpty ? [InfoRow(label: label, value: NOT_AVAILABLE)] : values.enumerated().map { InfoRow(label: $0.offset == 0 ? label : "", value: $0.element, copyable: true) }
     }
     let own = addresses[primary] ?? InterfaceAddresses()
     let router = global["Router"] as? String
@@ -284,7 +309,7 @@ private func readNetworkRows() -> [InfoRow] {
     let tunnels = addresses.filter { name, entry in TUNNEL_INTERFACE_PREFIXES.contains { name.hasPrefix($0) } && !entry.ipv4.isEmpty }.keys.sorted()
     let viaTunnel = TUNNEL_INTERFACE_PREFIXES.contains { primary.hasPrefix($0) }
     rows.append(InfoRow(label: "VPN", value: tunnels.isEmpty ? "Off" : "On (\(tunnels.joined(separator: ", "))\(viaTunnel ? ", default route" : ""))"))
-    return rows
+    return NetworkState(rows: rows, identity: ([primary, router ?? ""] + own.ipv4).joined(separator: " "))
 }
 
 /// Summarises the recent pings: last, min/avg/max of the replies, and loss.
@@ -293,49 +318,79 @@ private func readNetworkRows() -> [InfoRow] {
 private func pingRows(_ samples: [Double?]) -> [InfoRow] {
     let replies = samples.compactMap { $0 }
     let lost = samples.count - replies.count
-    let last = samples.last.map { $0.map { String(format: "%.1f ms", $0) } ?? "Lost" } ?? "—"
-    let spread = replies.isEmpty ? "—" : String(format: "%.1f / %.1f / %.1f ms", replies.min()!, replies.reduce(0, +) / Double(replies.count), replies.max()!)
-    let loss = samples.isEmpty ? "—" : "\(lost * 100 / samples.count)% (\(lost) of \(samples.count))"
+    let last = samples.last.map { $0.map { String(format: "%.1f ms", $0) } ?? "Lost" } ?? NOT_AVAILABLE
+    let spread = replies.isEmpty ? NOT_AVAILABLE : String(format: "%.1f / %.1f / %.1f ms", replies.min()!, replies.reduce(0, +) / Double(replies.count), replies.max()!)
+    let loss = samples.isEmpty ? NOT_AVAILABLE : "\(lost * 100 / samples.count)% (\(lost) of \(samples.count))"
     return [InfoRow(label: "Target", value: PING_HOST, copyable: true), InfoRow(label: "Last", value: last, copyable: true),
             InfoRow(label: "Min / avg / max", value: spread, copyable: true), InfoRow(label: "Loss", value: loss, copyable: true)]
 }
 
-/// The public address as an outside server sees it, fetched at most every
-/// PUBLIC_ADDRESS_CACHE_SECONDS.
-private enum PublicAddress {
-    static let UNAVAILABLE = "Unavailable"
-    static var value: String?
-    static var fetchedAt = Date.distantPast
+/// Answers that take a while, kept per network: the public address for
+/// PUBLIC_ADDRESS_CACHE_SECONDS (a failure for PUBLIC_ADDRESS_RETRY_SECONDS), the `system_profiler` Wi-Fi report until the network changes.
+/// One request of each kind runs at a time; an answer for a network that is no longer current
+/// is dropped.
+@MainActor private enum SlowAnswers {
+    private static var publicAddress: (identity: String, value: String, expires: Date)?
+    private static var publicAddressRequest: String?
+    private static var reportedWiFi: (identity: String, value: ReportedWiFi)?
+    private static var reportedWiFiRequest: String?
 
-    /// Calls `completion` on the main thread with the address, fetching it when the cached one
-    /// is stale; UNAVAILABLE when the request fails.
-    static func read(_ completion: @escaping (String) -> Void) {
-        if let value, Date().timeIntervalSince(fetchedAt) < PUBLIC_ADDRESS_CACHE_SECONDS { return completion(value) }
+    /// The cached public address of this network; nil while unknown or stale.
+    static func publicAddress(for identity: String) -> String? {
+        guard let publicAddress, publicAddress.identity == identity, Date() < publicAddress.expires else { return nil }
+        return publicAddress.value
+    }
+
+    /// The cached Wi-Fi report of this network; nil while unknown.
+    static func reportedWiFi(for identity: String) -> ReportedWiFi? {
+        reportedWiFi.flatMap { $0.identity == identity ? $0.value : nil }
+    }
+
+    /// Fetches the public address of this network unless it is cached or already being fetched.
+    /// @param identity The current network. @param completion Runs on the main thread when an answer arrived.
+    static func fetchPublicAddress(for identity: String, completion: @escaping @MainActor @Sendable () -> Void) {
+        guard publicAddress(for: identity) == nil, publicAddressRequest != identity else { return }
+        publicAddressRequest = identity
         var request = URLRequest(url: PUBLIC_ADDRESS_URL)
         request.timeoutInterval = PUBLIC_ADDRESS_TIMEOUT_SECONDS
         URLSession.shared.dataTask(with: request) { data, response, _ in
-            let text = data.map { String(decoding: $0, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines) }
-            let ok = (response as? HTTPURLResponse)?.statusCode == 200 && !(text ?? "").isEmpty
-            RunLoop.main.perform(inModes: [.common]) {
-                if ok { value = text; fetchedAt = Date() }
-                completion(ok ? text! : UNAVAILABLE)
+            let text = data.map { String(decoding: $0, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines) } ?? ""
+            let answer = (response as? HTTPURLResponse)?.statusCode == 200 && !text.isEmpty ? text : PUBLIC_ADDRESS_UNAVAILABLE
+            performOnMain {
+                publicAddressRequest = nil
+                publicAddress = (identity, answer, Date().addingTimeInterval(answer == PUBLIC_ADDRESS_UNAVAILABLE ? PUBLIC_ADDRESS_RETRY_SECONDS : PUBLIC_ADDRESS_CACHE_SECONDS))
+                completion()
             }
         }.resume()
     }
+
+    /// Asks `system_profiler` for the Wi-Fi report of this network unless it is cached or already being asked.
+    /// @param identity The current network. @param completion Runs on the main thread when the answer arrived.
+    static func fetchReportedWiFi(for identity: String, completion: @escaping @MainActor @Sendable () -> Void) {
+        guard reportedWiFi(for: identity) == nil, reportedWiFiRequest != identity else { return }
+        reportedWiFiRequest = identity
+        DispatchQueue.global(qos: .userInitiated).async {
+            let reported = readWiFiNameFromSystemProfiler()
+            performOnMain {
+                reportedWiFiRequest = nil
+                reportedWiFi = (identity, reported)
+                completion()
+            }
+        }
+    }
 }
 
-private var pingItem: NSStatusItem?
-private var pingSamples: [Double?] = []
+@MainActor private var pingSamples: [Double?] = []
+@MainActor private var pingInFlight = false
+@MainActor private var pingItem: NSStatusItem?
 
 /// The drop-down: the Wi-Fi link, the network and the recent pings, built when it opens and
 /// refreshed in place every second while open. The values that take a while (the network name
 /// when CoreWLAN withholds it, the public address) read "Asking…" until they arrive.
-private final class PingMenuDelegate: NSObject, NSMenuDelegate {
+@MainActor private final class PingMenuDelegate: NSObject, NSMenuDelegate {
     private var wifiSection: MenuSection?
     private var networkSection: MenuSection?
     private var pingSection: MenuSection?
-    private var reportedWiFi: ReportedWiFi?
-    private var publicAddress: String?
     private let timer = OpenMenuTimer()
 
     func menuNeedsUpdate(_ menu: NSMenu) {
@@ -346,64 +401,51 @@ private final class PingMenuDelegate: NSObject, NSMenuDelegate {
         menu.addItem(.separator())
         pingSection = MenuSection(in: menu, title: "Ping, last \(PING_WINDOW_SAMPLES) s", folds: false)
         appendQuit(to: menu)
-        reportedWiFi = nil
-        publicAddress = nil
-        if refresh() {
-            DispatchQueue.global(qos: .userInitiated).async {
-                let reported = readWiFiNameFromSystemProfiler()
-                RunLoop.main.perform(inModes: [.common]) { [weak self] in
-                    self?.reportedWiFi = reported
-                    self?.refresh()
-                }
-            }
-        }
-        PublicAddress.read { [weak self] address in
-            self?.publicAddress = address
-            self?.refresh()
-        }
+        refresh()
     }
 
     func menuWillOpen(_ menu: NSMenu) { timer.start { [weak self] in self?.refresh() } }
 
     func menuDidClose(_ menu: NSMenu) { timer.stop() }
 
-    /// Reads every value again and shows it.
-    /// @returns Whether CoreWLAN withheld the network name.
-    @discardableResult
-    private func refresh() -> Bool {
-        let wifi = readWiFiRows(reported: reportedWiFi)
+    /// Reads every value again and shows it, asking for the slow answers this network lacks.
+    private func refresh() {
+        let network = readNetworkState()
+        let wifi = readWiFiRows(reported: SlowAnswers.reportedWiFi(for: network.identity))
         wifiSection?.update(wifi.rows)
-        let address = publicAddress ?? "Asking…"
-        networkSection?.update(readNetworkRows() + [InfoRow(label: "Public IP", value: address, copyable: publicAddress != nil && address != PublicAddress.UNAVAILABLE)])
+        let address = SlowAnswers.publicAddress(for: network.identity)
+        networkSection?.update(network.rows + [InfoRow(label: "Public IP", value: address ?? ASKING, copyable: address != nil && address != PUBLIC_ADDRESS_UNAVAILABLE)])
         pingSection?.update(pingRows(pingSamples))
-        return wifi.nameWithheld
+        let refreshAgain: @MainActor @Sendable () -> Void = { [weak self] in self?.refresh() }
+        if wifi.nameWithheld { SlowAnswers.fetchReportedWiFi(for: network.identity, completion: refreshAgain) }
+        SlowAnswers.fetchPublicAddress(for: network.identity, completion: refreshAgain)
     }
 }
 
-private let pingMenuDelegate = PingMenuDelegate()
+@MainActor private let pingMenuDelegate = PingMenuDelegate()
 
 /// Adds the ping and Wi-Fi signal item to the menu bar and starts measuring; its drop-down
 /// describes the Wi-Fi link, the network and the recent pings.
-func startPing() {
+@MainActor func startPing() {
     let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-    item.autosaveName = "capybarPing"
+    item.autosaveName = PING_AUTOSAVE_NAME
     let menu = NSMenu()
     menu.delegate = pingMenuDelegate
     item.menu = menu
     pingItem = item
-    var pingInFlight = false
-    scheduleRepeatingTimer(every: PING_REFRESH_SECONDS) { _ in
+    scheduleRepeatingTimer(every: PING_REFRESH_SECONDS) {
         guard !pingInFlight else { return }
         pingInFlight = true
         DispatchQueue.global(qos: .utility).async {
             let milliseconds = measurePing()
-            RunLoop.main.perform(inModes: [.common]) {
+            performOnMain {
                 pingSamples = Array((pingSamples + [milliseconds]).suffix(PING_WINDOW_SAMPLES))
                 let signal = readSignalPercent()
-                showTwoLines(on: item, top: milliseconds.map { "\(Int($0.rounded())) ms" } ?? "— ms",
+                guard let pingItem else { return }
+                showTwoLines(on: pingItem, top: milliseconds.map { "\(Int($0.rounded())) ms" } ?? "— ms",
                              topCritical: milliseconds.map { $0 > SLOW_PING_MILLISECONDS } ?? true,
                              bottom: signal.map { "\($0)%" } ?? "—%",
-                             bottomCritical: signal.map { $0 < WEAK_SIGNAL_PERCENT } ?? true, widest: "150 ms")
+                             bottomCritical: signal.map { $0 < WEAK_SIGNAL_PERCENT } ?? true, widest: PING_WIDEST_TEXTS)
                 pingInFlight = false
             }
         }

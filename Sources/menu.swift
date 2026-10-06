@@ -18,25 +18,24 @@ private let KILL_BUTTON_SIZE: CGFloat = 16
 private let KILL_BUTTON_GAP: CGFloat = 10
 private let REFRESH_AFTER_KILL_SECONDS = 0.25
 private let COPIED_NOTICE_SECONDS = 0.9
+private let COPIED_NOTICE = "Copied ✓"
 private let OPEN_MENU_REFRESH_SECONDS = 1.0
 private let HIGHLIGHT_INSET: CGFloat = 5
 private let HIGHLIGHT_RADIUS: CGFloat = 4
-private let ROW_FONT = NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
-private let COLUMN_HEADER_FONT = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize, weight: .medium)
+@MainActor private let ROW_FONT = NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+@MainActor private let COLUMN_HEADER_FONT = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize, weight: .medium)
 
 /// What a row shows after its value columns.
 enum KillControl {
     /// Nothing.
     case none
-    /// An empty space as wide as the cross, so headings line up with rows that carry one.
-    case placeholder
     /// A cross that force quits these processes; disabled when the list is empty.
     case button([pid_t])
 
-    /// Whether the row keeps room for the cross after its values.
-    var reservesColumn: Bool {
-        if case .none = self { return false }
-        return true
+    /// Whether the row carries the cross.
+    var hasButton: Bool {
+        if case .button = self { return true }
+        return false
     }
 }
 
@@ -66,7 +65,7 @@ struct InfoRow {
 
 /// Puts text on the general pasteboard, replacing what was there.
 /// @param text The text.
-private func copyToPasteboard(_ text: String) {
+@MainActor private func copyToPasteboard(_ text: String) {
     NSPasteboard.general.clearContents()
     NSPasteboard.general.setString(text, forType: .string)
 }
@@ -75,6 +74,9 @@ private func copyToPasteboard(_ text: String) {
 /// symbol carries its colour in its own configuration: a template image tinted through
 /// `contentTintColor` is not drawn inside a menu row view while the button is enabled.
 private final class KillButton: NSButton {
+    /// Runs when the mouse goes down on the button, before AppKit tracks the press.
+    var onPress: (() -> Void)?
+
     private static func crossImage(_ color: NSColor) -> NSImage {
         let symbol = NSImage(systemSymbolName: "xmark.circle.fill", accessibilityDescription: "Force Quit")!
         return symbol.withSymbolConfiguration(NSImage.SymbolConfiguration(hierarchicalColor: color))!
@@ -103,6 +105,11 @@ private final class KillButton: NSButton {
     override func mouseEntered(with event: NSEvent) { if isEnabled { image = KillButton.hoverImage } }
 
     override func mouseExited(with event: NSEvent) { image = KillButton.restImage }
+
+    override func mouseDown(with event: NSEvent) {
+        onPress?()
+        super.mouseDown(with: event)
+    }
 }
 
 /// The view of one menu row: the name on the left, value columns right-aligned at the right
@@ -113,29 +120,34 @@ private final class MenuRowView: NSView {
     private let nameLabel: NSTextField
     private let valueLabels: [NSTextField]
     private let killButton: KillButton?
-    private let reservesKillColumn: Bool
     private let valueWidth: CGFloat
     private var row: MenuRow
     private var processIds: [pid_t] = []
+    /// The row's name and processes when the cross went down; the refresh may show another
+    /// process group in this row before the press completes.
+    private var pressedTarget: (name: String, processIds: [pid_t])?
     private var copiedUntil = Date.distantPast
-    private let onKill: () -> Void
+    private let onKill: @MainActor () -> Void
 
     /// @param row The row to show. @param font Text font. @param onKill Runs after the cross killed the row's processes.
-    init(row: MenuRow, font: NSFont, onKill: @escaping () -> Void) {
+    init(row: MenuRow, font: NSFont, onKill: @escaping @MainActor () -> Void) {
         self.row = row
         nameLabel = MenuRowView.makeLabel(font: font, alignment: .left)
         valueLabels = row.values.map { _ in MenuRowView.makeLabel(font: font, alignment: .right) }
-        reservesKillColumn = row.kill.reservesColumn
         valueWidth = row.valueWidth
         self.onKill = onKill
-        if case .button = row.kill { killButton = KillButton(action: #selector(killPressed)) } else { killButton = nil }
-        let killWidth = reservesKillColumn ? KILL_BUTTON_GAP + KILL_BUTTON_SIZE : 0
+        killButton = row.kill.hasButton ? KillButton(action: #selector(killPressed)) : nil
+        let killWidth = row.kill.hasButton ? KILL_BUTTON_GAP + KILL_BUTTON_SIZE : 0
         let width = ROW_LEADING_INSET + row.nameWidth + CGFloat(row.values.count) * row.valueWidth + killWidth + ROW_TRAILING_INSET
         super.init(frame: NSRect(x: 0, y: 0, width: width, height: ROW_HEIGHT))
         autoresizingMask = [.width]
         ([nameLabel] + valueLabels).forEach(addSubview)
         if let killButton {
             killButton.target = self
+            killButton.onPress = { [weak self] in
+                guard let self else { return }
+                self.pressedTarget = (self.row.name, self.processIds)
+            }
             addSubview(killButton)
         }
         show(row)
@@ -145,8 +157,7 @@ private final class MenuRowView: NSView {
 
     /// Whether `row` can be shown by this view without rebuilding it.
     func fits(_ row: MenuRow) -> Bool {
-        row.values.count == valueLabels.count && row.kill.reservesColumn == reservesKillColumn && row.valueWidth == valueWidth
-            && (killButton != nil) == { if case .button = row.kill { return true } else { return false } }()
+        row.values.count == valueLabels.count && row.valueWidth == valueWidth && row.kill.hasButton == (killButton != nil)
     }
 
     /// Shows new content in place.
@@ -161,7 +172,9 @@ private final class MenuRowView: NSView {
         if case .button(let killable) = row.kill {
             processIds = killable
             killButton?.isEnabled = !killable.isEmpty
-            killButton?.toolTip = killable.isEmpty ? "Belongs to another user or to capybar itself; macOS does not permit it" : "Force Quit every \(row.name) process"
+            killButton?.toolTip = killable.isEmpty
+                ? (PROTECTED_PROCESS_NAMES.contains(row.name) ? "Ending it would end the session" : "Belongs to another user or to capybar itself; macOS does not permit it")
+                : "Force Quit every \(row.name) process"
         }
         needsDisplay = true
     }
@@ -182,8 +195,8 @@ private final class MenuRowView: NSView {
         let lineHeight = ceil(nameLabel.intrinsicContentSize.height)
         let textY = floor((bounds.height - lineHeight) / 2)
         var right = bounds.width - ROW_TRAILING_INSET
-        if reservesKillColumn {
-            killButton?.frame = NSRect(x: right - KILL_BUTTON_SIZE, y: floor((bounds.height - KILL_BUTTON_SIZE) / 2), width: KILL_BUTTON_SIZE, height: KILL_BUTTON_SIZE)
+        if let killButton {
+            killButton.frame = NSRect(x: right - KILL_BUTTON_SIZE, y: floor((bounds.height - KILL_BUTTON_SIZE) / 2), width: KILL_BUTTON_SIZE, height: KILL_BUTTON_SIZE)
             right -= KILL_BUTTON_SIZE + KILL_BUTTON_GAP
         }
         for label in valueLabels.reversed() {
@@ -208,32 +221,31 @@ private final class MenuRowView: NSView {
         guard let copyValue = row.copyValue else { return super.mouseUp(with: event) }
         copyToPasteboard(copyValue)
         copiedUntil = Date().addingTimeInterval(COPIED_NOTICE_SECONDS)
-        nameLabel.stringValue = "Copied ✓"
-        let timer = Timer(timeInterval: COPIED_NOTICE_SECONDS, repeats: false) { [weak self] _ in
+        nameLabel.stringValue = COPIED_NOTICE
+        runAfter(COPIED_NOTICE_SECONDS) { [weak self] in
             guard let self else { return }
             self.nameLabel.stringValue = self.row.name
         }
-        RunLoop.main.add(timer, forMode: .common)
     }
 
     @objc private func killPressed() {
-        forceQuit(processIds)
+        guard let target = pressedTarget else { return }
+        pressedTarget = nil
         killButton?.isEnabled = false
-        let timer = Timer(timeInterval: REFRESH_AFTER_KILL_SECONDS, repeats: false) { [onKill] _ in onKill() }
-        RunLoop.main.add(timer, forMode: .common)
+        forceQuit(target.processIds, named: target.name) { [onKill] in runAfter(REFRESH_AFTER_KILL_SECONDS, onKill) }
     }
 }
 
 /// Shows a row in a menu item, reusing its view when the shape allows; the item's title (unseen,
 /// read by VoiceOver) is the row's name.
-/// @param row Content. @param item Target item. @param font Text font. @param onKill Runs after a force quit.
-private func show(_ row: MenuRow, in item: NSMenuItem, font: NSFont = ROW_FONT, onKill: @escaping () -> Void) {
+/// @param row Content. @param item Target item. @param font Text font, ROW_FONT when nil. @param onKill Runs after a force quit.
+@MainActor private func show(_ row: MenuRow, in item: NSMenuItem, font: NSFont? = nil, onKill: @escaping @MainActor () -> Void) {
     if item.title != row.name { item.title = row.name }
-    if let view = item.view as? MenuRowView, view.fits(row) { view.show(row) } else { item.view = MenuRowView(row: row, font: font, onKill: onKill) }
+    if let view = item.view as? MenuRowView, view.fits(row) { view.show(row) } else { item.view = MenuRowView(row: row, font: font ?? ROW_FONT, onKill: onKill) }
 }
 
 /// Makes a section title item.
-private func makeHeader(_ title: String) -> NSMenuItem {
+@MainActor private func makeHeader(_ title: String) -> NSMenuItem {
     let header = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     header.attributedTitle = NSAttributedString(string: title, attributes: [.font: NSFont.boldSystemFont(ofSize: NSFont.systemFontSize)])
     return header
@@ -242,7 +254,7 @@ private func makeHeader(_ title: String) -> NSMenuItem {
 /// Brings the row items of a menu to `rows`, updating items in place and inserting or removing
 /// only the difference, right after `anchor` (or at the top when nil).
 /// @returns The row items in order.
-private func reconcile(_ items: [NSMenuItem], with rows: [MenuRow], in menu: NSMenu, after anchor: NSMenuItem?, onKill: @escaping () -> Void) -> [NSMenuItem] {
+@MainActor private func reconcile(_ items: [NSMenuItem], with rows: [MenuRow], in menu: NSMenu, after anchor: NSMenuItem?, onKill: @escaping @MainActor () -> Void) -> [NSMenuItem] {
     var items = items
     while items.count > rows.count { menu.removeItem(items.removeLast()) }
     for (index, row) in rows.enumerated() {
@@ -261,11 +273,11 @@ private func reconcile(_ items: [NSMenuItem], with rows: [MenuRow], in menu: NSM
 
 /// A section of a menu: a bold title, optional column headings, then rows. A folding section
 /// shows the VISIBLE_ROWS largest rows and folds the next ones, up to FOLDED_ROWS_LIMIT, under
-/// "More (N)". `update` changes the rows in place.
-final class MenuSection {
+/// "More (N)", N being the rows it holds. `update` changes the rows in place.
+@MainActor final class MenuSection {
     private let menu: NSMenu
     private let folds: Bool
-    private let onKill: () -> Void
+    private let onKill: @MainActor () -> Void
     private let lastFixedItem: NSMenuItem
     private var rowItems: [NSMenuItem] = []
     private var moreItem: NSMenuItem?
@@ -274,7 +286,7 @@ final class MenuSection {
     /// Appends the section's title (and headings) to the end of the menu.
     /// @param menu Target menu. @param title Section title. @param columns Headings over the value columns; empty shows none.
     /// @param folds Whether rows beyond VISIBLE_ROWS fold under "More". @param onKill Runs after a row's cross killed its processes.
-    init(in menu: NSMenu, title: String, columns: [String] = [], folds: Bool, onKill: @escaping () -> Void = {}) {
+    init(in menu: NSMenu, title: String, columns: [String] = [], folds: Bool, onKill: @escaping @MainActor () -> Void = {}) {
         self.menu = menu
         self.folds = folds
         self.onKill = onKill
@@ -292,11 +304,9 @@ final class MenuSection {
 
     /// Shows `rows`, largest first.
     func update(_ rows: [MenuRow]) {
-        let visible = folds ? Array(rows.prefix(VISIBLE_ROWS)) : rows
-        rowItems = reconcile(rowItems, with: visible, in: menu, after: lastFixedItem, onKill: onKill)
-        guard folds else { return }
-        let folded = Array(rows.dropFirst(VISIBLE_ROWS).prefix(FOLDED_ROWS_LIMIT))
-        if folded.isEmpty {
+        let parts = folds ? foldRows(rows, visibleCount: VISIBLE_ROWS, foldedLimit: FOLDED_ROWS_LIMIT) : FoldedRows(visible: rows, folded: [])
+        rowItems = reconcile(rowItems, with: parts.visible, in: menu, after: lastFixedItem, onKill: onKill)
+        if parts.folded.isEmpty {
             if let moreItem { menu.removeItem(moreItem) }
             moreItem = nil
             foldedItems = []
@@ -309,9 +319,9 @@ final class MenuSection {
             menu.insertItem(more, at: menu.index(of: rowItems.last ?? lastFixedItem) + 1)
             moreItem = more
         }
-        let title = "More (\(rows.count - VISIBLE_ROWS))"
+        let title = "More (\(parts.folded.count))"
         if more.title != title { more.title = title }
-        foldedItems = reconcile(foldedItems, with: folded, in: more.submenu!, after: nil, onKill: onKill)
+        if let submenu = more.submenu { foldedItems = reconcile(foldedItems, with: parts.folded, in: submenu, after: nil, onKill: onKill) }
     }
 
     /// Shows labelled values.
@@ -319,13 +329,13 @@ final class MenuSection {
 }
 
 /// Repeats an action every second while a menu is open.
-final class OpenMenuTimer {
+@MainActor final class OpenMenuTimer {
     private var timer: Timer?
 
     /// Starts repeating `action`; a running timer is replaced.
-    func start(_ action: @escaping () -> Void) {
+    func start(_ action: @escaping @MainActor () -> Void) {
         timer?.invalidate()
-        timer = scheduleRepeatingTimer(every: OPEN_MENU_REFRESH_SECONDS) { _ in action() }
+        timer = scheduleRepeatingTimer(every: OPEN_MENU_REFRESH_SECONDS, action)
     }
 
     /// Stops repeating.
@@ -338,7 +348,7 @@ final class OpenMenuTimer {
 /// Appends Quit, after a separator when the menu holds anything else, and above it the update
 /// entry while a newer release exists.
 /// @param menu Target menu.
-func appendQuit(to menu: NSMenu) {
+@MainActor func appendQuit(to menu: NSMenu) {
     if menu.numberOfItems > 0 { menu.addItem(.separator()) }
     if let update = Updater.makeMenuItem() { menu.addItem(update) }
     menu.addItem(withTitle: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")

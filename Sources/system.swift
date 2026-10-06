@@ -6,53 +6,55 @@ import AppKit
 private let SYSTEM_REFRESH_SECONDS = 1.0
 private let CPU_CRITICAL_PERCENT = 85.0
 private let RAM_CRITICAL_PERCENT = 90.0
+/// CPU below this share is not worth a row.
+private let CPU_ROW_MINIMUM_PERCENT = 0.1
+private let SYSTEM_AUTOSAVE_NAME = "capybarSystem"
+private let SYSTEM_WIDEST_TEXTS = ["CPU 100%", "RAM 100%"]
 
-/// Reads cumulative CPU ticks across all cores.
-/// @returns (busy, total) tick counters since boot.
-private func readCpuTicks() -> (busy: UInt64, total: UInt64) {
+/// Reads cumulative CPU ticks across all cores. @returns The ticks; nil when the kernel call fails.
+private func readCpuTicks() -> CpuTicks? {
     var info = host_cpu_load_info()
     var count = mach_msg_type_number_t(MemoryLayout<host_cpu_load_info>.size / MemoryLayout<integer_t>.size)
     let result = withUnsafeMutablePointer(to: &info) {
         $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { host_statistics(mach_host_self(), HOST_CPU_LOAD_INFO, $0, &count) }
     }
-    guard result == KERN_SUCCESS else { return (0, 0) }
-    let user = UInt64(info.cpu_ticks.0), system = UInt64(info.cpu_ticks.1), idle = UInt64(info.cpu_ticks.2), nice = UInt64(info.cpu_ticks.3)
-    return (user + system + nice, user + system + idle + nice)
+    guard result == KERN_SUCCESS else { return nil }
+    return CpuTicks(user: info.cpu_ticks.0, system: info.cpu_ticks.1, idle: info.cpu_ticks.2, nice: info.cpu_ticks.3)
 }
 
 /// Memory in use the way Activity Monitor's "Memory Used" counts it: app memory
 /// (internal pages − purgeable), wired and compressed.
-/// @returns Percent of physical memory in use, 0 when the kernel call fails.
-private func readRamPercent() -> Double {
+/// @returns Percent of physical memory in use; nil when the kernel call fails.
+private func readRamPercent() -> Double? {
     var stats = vm_statistics64()
     var count = mach_msg_type_number_t(MemoryLayout<vm_statistics64>.size / MemoryLayout<integer_t>.size)
     let result = withUnsafeMutablePointer(to: &stats) {
         $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { host_statistics64(mach_host_self(), HOST_VM_INFO64, $0, &count) }
     }
-    guard result == KERN_SUCCESS else { return 0 }
-    let pageSize = Double(vm_kernel_page_size)
-    let used = (Double(stats.internal_page_count) - Double(stats.purgeable_count) + Double(stats.wire_count) + Double(stats.compressor_page_count)) * pageSize
+    var pageSize = vm_size_t(0)
+    guard result == KERN_SUCCESS, host_page_size(mach_host_self(), &pageSize) == KERN_SUCCESS else { return nil }
+    let used = (Double(stats.internal_page_count) - Double(stats.purgeable_count) + Double(stats.wire_count) + Double(stats.compressor_page_count)) * Double(pageSize)
     return used / Double(ProcessInfo.processInfo.physicalMemory) * 100
 }
 
-private var systemItem: NSStatusItem?
-
 /// The drop-down: the processes using the most CPU and the most memory, the rest folded into
-/// "More", each with a cross that force quits it. Built when it opens, refreshed in place every
-/// second while open and right after a force quit.
-private final class SystemMenuDelegate: NSObject, NSMenuDelegate {
+/// "More", each with a cross that force quits it. It opens with the last sample and refreshes
+/// in place, off the main thread, every second while open and right after a force quit.
+@MainActor private final class SystemMenuDelegate: NSObject, NSMenuDelegate {
     private var cpuSection: MenuSection?
     private var memorySection: MenuSection?
+    private var lastUsage: [ProcessUsage] = []
     private let timer = OpenMenuTimer()
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
-        let refresh: () -> Void = { [weak self] in self?.refreshInBackground() }
+        let refresh: @MainActor () -> Void = { [weak self] in self?.refreshInBackground() }
         cpuSection = MenuSection(in: menu, title: "CPU (100% = one core)", folds: true, onKill: refresh)
         menu.addItem(.separator())
-        memorySection = MenuSection(in: menu, title: "Memory", folds: true, onKill: refresh)
+        memorySection = MenuSection(in: menu, title: "Memory (resident)", folds: true, onKill: refresh)
         appendQuit(to: menu)
-        show(readProcessUsage())
+        show(lastUsage)
+        refreshInBackground()
     }
 
     func menuWillOpen(_ menu: NSMenu) { timer.start { [weak self] in self?.refreshInBackground() } }
@@ -63,37 +65,40 @@ private final class SystemMenuDelegate: NSObject, NSMenuDelegate {
     private func refreshInBackground() {
         DispatchQueue.global(qos: .userInitiated).async {
             let usage = readProcessUsage()
-            RunLoop.main.perform(inModes: [.common]) { [weak self] in self?.show(usage) }
+            performOnMain { [weak self] in
+                self?.lastUsage = usage
+                self?.show(usage)
+            }
         }
     }
 
     private func show(_ usage: [ProcessUsage]) {
-        cpuSection?.update(usage.filter { $0.cpuPercent >= 0.1 }.sorted { $0.cpuPercent > $1.cpuPercent }
+        cpuSection?.update(usage.filter { $0.cpuPercent >= CPU_ROW_MINIMUM_PERCENT }.sorted { $0.cpuPercent > $1.cpuPercent }
             .map { MenuRow(name: $0.name, values: [String(format: "%.1f%%", $0.cpuPercent)], kill: .button($0.killableProcessIds)) })
         memorySection?.update(usage.sorted { $0.memoryBytes > $1.memoryBytes }
             .map { MenuRow(name: $0.name, values: [formatBytes($0.memoryBytes)], kill: .button($0.killableProcessIds)) })
     }
 }
 
-private let systemMenuDelegate = SystemMenuDelegate()
+@MainActor private let systemMenuDelegate = SystemMenuDelegate()
 
 /// Adds the CPU and RAM item to the menu bar and starts measuring; its drop-down lists the
 /// heaviest processes.
-func startSystemLoad() {
+@MainActor func startSystemLoad() {
     let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-    item.autosaveName = "capybarSystem"
+    item.autosaveName = SYSTEM_AUTOSAVE_NAME
     let menu = NSMenu()
     menu.delegate = systemMenuDelegate
     item.menu = menu
-    systemItem = item
     var previousTicks = readCpuTicks()
-    scheduleRepeatingTimer(every: SYSTEM_REFRESH_SECONDS) { _ in
-        let ticks = readCpuTicks()
-        let total = Double(ticks.total &- previousTicks.total)
-        let cpu = total > 0 ? Double(ticks.busy &- previousTicks.busy) / total * 100 : 0
-        previousTicks = ticks
-        let ram = readRamPercent()
+    var cpu = 0.0
+    scheduleRepeatingTimer(every: SYSTEM_REFRESH_SECONDS) {
+        if let ticks = readCpuTicks() {
+            if let previousTicks, let percent = busyPercent(from: previousTicks, to: ticks) { cpu = percent }
+            previousTicks = ticks
+        }
+        guard let ram = readRamPercent() else { return }
         showTwoLines(on: item, top: "CPU \(Int(cpu.rounded()))%", topCritical: cpu >= CPU_CRITICAL_PERCENT,
-                     bottom: "RAM \(Int(ram.rounded()))%", bottomCritical: ram >= RAM_CRITICAL_PERCENT, widest: "CPU 100%")
+                     bottom: "RAM \(Int(ram.rounded()))%", bottomCritical: ram >= RAM_CRITICAL_PERCENT, widest: SYSTEM_WIDEST_TEXTS)
     }.fire()
 }
