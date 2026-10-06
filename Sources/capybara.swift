@@ -223,7 +223,7 @@ private func runAppleScript(_ source: String) -> [String]? {
 /// Code in iTerm2, right shows Quit).
 private final class CapybaraView: NSView {
     var image: NSImage? { didSet { needsDisplay = true } }
-    private let quitMenu = makeQuitMenu(header: "Click: Claude Code in iTerm2")
+    private let quitMenu = makeQuitMenu()
 
     override func draw(_ dirtyRect: NSRect) {
         guard let image else { return }
@@ -286,10 +286,13 @@ func startCapybara() {
     Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in placeCapybaraWindow() }
     var pose = Pose()
     Timer.scheduledTimer(withTimeInterval: 1 / FRAMES_PER_SECOND, repeats: true) { _ in
+        // Nothing is drawn while the panel cannot be seen: screen locked or asleep, menu bar hidden.
+        guard panel.occlusionState.contains(.visible) else { return }
         var foreground = NSColor.labelColor
         view.effectiveAppearance.performAsCurrentDrawingAppearance { foreground = NSColor.labelColor.usingColorSpace(.deviceRGB) ?? .labelColor }
         let isDark = view.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-        background.layer?.backgroundColor = (isDark ? NSColor(srgbRed: 4 / 255, green: 3 / 255, blue: 4 / 255, alpha: 1) : NSColor.white).cgColor
+        let fill = (isDark ? NSColor(srgbRed: 4 / 255, green: 3 / 255, blue: 4 / 255, alpha: 1) : NSColor.white).cgColor
+        if background.layer?.backgroundColor != fill { background.layer?.backgroundColor = fill }
         view.image = makeImage(pose, foreground: foreground)
         advance(&pose)
     }.fire()

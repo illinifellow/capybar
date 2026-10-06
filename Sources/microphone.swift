@@ -121,7 +121,7 @@ private func enforceWantedMicrophoneState() {
 /// device changes.
 func startMicrophone() {
     let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-    item.menu = makeQuitMenu(header: "Only the microphone key (F5) mutes and unmutes")
+    item.menu = makeQuitMenu()
     // A fixed autosave name gives the item its own remembered position, kept beside the system
     // Sound item at the left edge of the Control Center group.
     item.autosaveName = "capybarMicrophone"

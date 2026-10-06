@@ -5,14 +5,34 @@ import Carbon
 
 private let TWO_LINE_FONT = NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .medium)
 
-/// Builds an item menu: an optional disabled header line, then Quit (quits all items).
-/// @param header Text of the first line; nil leaves only Quit.
+/// Rebuilds a Quit menu each time it opens, so the update entry appears when one is due.
+private final class QuitMenuDelegate: NSObject, NSMenuDelegate {
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems()
+        appendQuit(to: menu)
+    }
+}
+
+private let quitMenuDelegate = QuitMenuDelegate()
+
+/// Builds an item menu holding Quit (quits all items) and, while a newer release exists, the update entry.
 /// @returns The menu.
-func makeQuitMenu(header: String? = nil) -> NSMenu {
+func makeQuitMenu() -> NSMenu {
     let menu = NSMenu()
-    if let header { menu.addItem(withTitle: header, action: nil, keyEquivalent: "") }
-    menu.addItem(withTitle: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+    menu.delegate = quitMenuDelegate
+    appendQuit(to: menu)
     return menu
+}
+
+/// Schedules a repeating timer in the common run loop modes, so it keeps firing while a menu is
+/// open (menus track events in a mode a default timer never fires in).
+/// @param interval Seconds between runs. @param block The work.
+/// @returns The timer.
+@discardableResult
+func scheduleRepeatingTimer(every interval: TimeInterval, _ block: @escaping (Timer) -> Void) -> Timer {
+    let timer = Timer(timeInterval: interval, repeats: true, block: block)
+    RunLoop.main.add(timer, forMode: .common)
+    return timer
 }
 
 /// Resolves the label colour for the item's current appearance (light or dark menu bar).
@@ -26,12 +46,28 @@ func labelColor(of item: NSStatusItem) -> NSColor {
     return color
 }
 
+private var shownTwoLines: [ObjectIdentifier: String] = [:]
+
+/// Shows two stacked lines on a status item, redrawing only when the item can be seen and the
+/// text, the red state or the menu bar's label colour changed since it was last drawn.
+/// @param item Target item. @param top Upper line. @param topCritical Draws the upper line red.
+/// @param bottom Lower line. @param bottomCritical Draws the lower line red.
+/// @param widest Longest text either line can hold.
+func showTwoLines(on item: NSStatusItem, top: String, topCritical: Bool = false, bottom: String, bottomCritical: Bool = false, widest: String) {
+    guard item.button?.window?.occlusionState.contains(.visible) ?? false else { return }
+    let foreground = labelColor(of: item)
+    let key = "\(top)|\(topCritical)|\(bottom)|\(bottomCritical)|\(foreground)"
+    guard shownTwoLines[ObjectIdentifier(item)] != key else { return }
+    shownTwoLines[ObjectIdentifier(item)] = key
+    item.button?.image = makeTwoLineImage(top: top, topCritical: topCritical, bottom: bottom, bottomCritical: bottomCritical, widest: widest, foreground: foreground)
+}
+
 /// Renders two stacked lines, 22 pt high, as wide as `widest` so the item never changes width.
 /// @param top Upper line. @param topCritical Draws the upper line red.
 /// @param bottom Lower line. @param bottomCritical Draws the lower line red.
 /// @param widest Longest text either line can hold. @param foreground Normal text colour.
 /// @returns A non-template NSImage.
-func makeTwoLineImage(top: String, topCritical: Bool = false, bottom: String, bottomCritical: Bool = false, widest: String, foreground: NSColor) -> NSImage {
+private func makeTwoLineImage(top: String, topCritical: Bool, bottom: String, bottomCritical: Bool, widest: String, foreground: NSColor) -> NSImage {
     func line(_ text: String, critical: Bool) -> NSAttributedString {
         NSAttributedString(string: text, attributes: [.font: TWO_LINE_FONT, .foregroundColor: critical ? NSColor.systemRed : foreground])
     }
