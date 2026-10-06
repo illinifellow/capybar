@@ -10,13 +10,13 @@
 [![macOS](https://img.shields.io/badge/macOS-14%2B-88bd66)](https://www.apple.com/macos/)
 [![Buy me a coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-ffdd04?logo=buymeacoffee&logoColor=000)](https://buymeacoffee.com/illinifellow)
 
-![capybar in the macOS menu bar, enlarged three times: CPU and memory, upload and download, ping and Wi-Fi quality, the muted microphone among the system icons, and the capybara beside the clock](docs/menubar.png)
+![The Constitution opened: the five processes using the most CPU and the five holding the most memory, each with a cross that ends it at once, the rest folded under More](docs/cpu.png)
 
 The menu bar, the one strip never out of sight, is squandered on matters consulted twice a day. A gentleman at work wishes to know at a glance whether the machine labours and for whom, whether the network moves, who is to blame for a slow line, and whether the microphone is silent. Each answer meant opening a window; existing utilities came as dashboards with a subscription, as though one had asked the time and been sold a clock tower.
 
 Hence four readings, red only when something matters; a click that names the culprit; a microphone obeying its own key alone; nothing to configure. Plain-text figures made the bar fidget, so each is a fixed-width image. The microphone, altered without leave by applications and macOS, is now held by capybar and restored the instant anyone touches it. The capybara came last and declined to leave: a bar of gauges is a cockpit, one calm rodent makes it a home.
 
-![The Constitution opened: the five processes using the most CPU and the five holding the most memory, each with a cross that ends it at once, the rest folded under More](docs/cpu.png)
+![The Ping opened: Wi-Fi network, channel, signal and noise, addresses, router, DNS, VPN and the last minute's pings](docs/ping.png)
 
 ## Of How the Thing Is Built
 
@@ -34,8 +34,6 @@ The menu bar had been given over to persons of no particular breeding: a clock, 
    ![The Network opened: per process, rates now and totals, busiest first](docs/network.png)
 
 3. **The Ping**: round-trip to `8.8.8.8` above, Wi-Fi quality below (−100 dBm = 0%, −50 dBm or better = 100%), each second, via capybar's own ICMP socket. No reply within a second, or one over 150 ms, turns the ping red, as one raises an eyebrow at a footman late with the tea; quality turns red below 50% or without Wi-Fi. A click lays out the connection: network, channel, band, PHY mode, signal, noise, SNR, transmit rate, security, country; interface, IPv4, IPv6, router, DNS, VPN, public address; the last minute's pings with min, average, max and losses. Clicking any figure copies it (*Copied*). macOS withholds the BSSID from an unbundled program, and capybar says so; the network name comes from `system_profiler` once per network; the public address from `api.ipify.org`, kept five minutes or until the network changes.
-
-   ![The Ping opened: Wi-Fi network, channel, signal and noise, addresses, router, DNS, VPN and the last minute's pings](docs/ping.png)
 
 4. **The Microphone**: crossed out and red when the default input is muted. Each press of the keyboard's microphone key toggles it, and nothing else may: capybar remaps the key to F5 with `hidutil` (ending macOS's Dictation prompts), catches it, and listens to the device, restoring at once any state another party alters. Each device is governed through one control, its mute switch where settable, else its volume, so the icon never claims a silence it cannot enforce; a muted volume's level is remembered per device and restored, and a device with neither control says so in the tooltip. The microphone is muted at every start, wake and unlock, unless at unlock the key last unmuted it and an application is listening, a call that outlasted a locked screen not being silenced behind its owner's back.
 5. **The Capybara** sits in a borderless panel over the Control Center icon, hiding it (Control Center is then reached through System Settings) and following it. She walks, chews grass, reclines with a red apple on her head, sleeps in a procession of *z*s, stands in the rain and swims, apple in place, at eight frames a second; she is not to be hurried. Finding that icon requires Screen Recording; denied it, she queues among the others without complaint. A left click brings forward the iTerm2 session running Claude Code (process `claude`), or opens a window running `claude`, or the command set with `defaults write capybar claudeCodeCommand '…'`; without iTerm2 she merely looks up. A right click offers *Quit*. On the first summons macOS asks whether `capybar` may control iTerm2; answer *Allow*, unless one prefers the life of a lighthouse keeper, whose only correspondent is the sea.
