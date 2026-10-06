@@ -12,39 +12,37 @@
 
 ![capybar in the macOS menu bar, enlarged three times: CPU and memory, upload and download, ping and Wi-Fi quality, the muted microphone among the system icons, and the capybara beside the clock](docs/menubar.png)
 
-It had long been remarked, in households of the better sort, that the menu bar of a Mac is the one strip of ground that is never out of sight, and that it is squandered almost entirely upon matters one consults twice a day. A gentleman at his work wishes to know rather different things, and to know them at a glance: whether the machine is labouring, and at whose expense; whether the network is moving or merely pretending to; whether a sluggish connection is the fault of the Wi-Fi or of some distant party; and, before every call, whether the microphone is at last silent. Each answer was to be had, but only by opening a window, which is precisely the exertion a glance exists to spare. Such utilities as already offered themselves arrived in the manner of a dashboard, with dozens of graphs, a preferences window and a subscription, as though one had asked for the time and been sold a clock tower.
+The menu bar, the one strip never out of sight, is squandered on matters consulted twice a day. A gentleman at work wishes to know at a glance whether the machine labours and for whom, whether the network moves, who is to blame for a slow line, and whether the microphone is silent. Each answer meant opening a window; existing utilities came as dashboards with a subscription, as though one had asked the time and been sold a clock tower.
 
-The ambition, therefore, was modest and severe: four readings, always legible, which colour themselves red only when something genuinely requires attention; a click upon any of them that names the culprit without ceremony; a microphone that answers to its own key and to no one else; and nothing that must be configured before it will serve. The first attempts wrote their figures as plain text, and the bar fidgeted every second as the numbers changed their width, which no respectable household tolerates; drawing each reading as an image of fixed width, in the menu bar's own colour, restored its composure. The microphone proved the most wilful member of the establishment, for applications and macOS alike kept altering its state without leave, and so capybar now holds the key itself and restores the device the instant anyone else presumes to touch it. The capybara arrived last and declined to leave, it having been observed that a menu bar of gauges resembles a cockpit, whereas one calm rodent in the corner makes of it a place where somebody lives.
+Hence four readings, red only when something matters; a click that names the culprit; a microphone obeying its own key alone; nothing to configure. Plain-text figures made the bar fidget, so each is a fixed-width image. The microphone, altered without leave by applications and macOS, is now held by capybar and restored the instant anyone touches it. The capybara came last and declined to leave: a bar of gauges is a cockpit, one calm rodent makes it a home.
 
 ![The Constitution opened: the five processes using the most CPU and the five holding the most memory, each with a cross that ends it at once, the rest folded under More](docs/cpu.png)
 
 ## Of How the Thing Is Built
 
-It is one native Swift program keeping four status items and a small panel, admitted at each login by a launch agent of unimpeachable punctuality. Its intelligence is taken directly from the system, without intermediaries: the kernel's own tally of the processor, memory reckoned as Activity Monitor reckons it, traffic counted on the physical interfaces alone, a ping sent through its own ICMP socket and the strength of the Wi-Fi once every second, and nothing redrawn that has not changed; the capybara occupies a small animated panel laid over the Control Center icon; and the microphone and moon keys are remapped with `hidutil`, beside whatever remaps their owner already keeps, so that their decisions may be enforced, and are handed back to macOS the moment capybar withdraws.
+One native Swift program, four status items and a panel, admitted at login by a launch agent. It reads the system without intermediaries: the kernel's processor tally, memory as Activity Monitor reckons it, physical-interface traffic, its own ICMP ping and Wi-Fi strength each second, redrawing only what changed. The microphone and moon keys are remapped with `hidutil` beside the owner's own remaps, and handed back when capybar withdraws.
 
 *Being a Brief and Respectful Account of a Small Rodent of Quality, Lately Elevated to the macOS Menu Bar, Together with Such Instruments of Measurement as Befit Her Retinue.*
 
 ## I. Of the Establishment, and Why It Exists at All
 
-One had long observed that the menu bar of a Mac, that narrow and much-coveted strip of ground at the summit of the screen, was given over almost entirely to persons of no particular breeding: a clock, a battery, an assortment of icons whose owners one could not, upon interrogation, recall having admitted. Into this unpromising company there is now introduced a capybara. She is accompanied by four attendants of strictly practical disposition, and the whole household lives in a single process, as a respectable household ought.
+The menu bar had been given over to persons of no particular breeding: a clock, a battery, icons nobody recalls admitting. Into this company comes a capybara with four practical attendants, the household living in one process, as a respectable household ought. From left to right, the capybara beside the clock:
 
-From left to right, the capybara keeping the place of honour at the far end, beside the clock:
+1. **The Constitution**: CPU above, memory used below (Activity Monitor's *Memory Used*), each second; red at CPU 85% or memory 90%. A click lists the top five processes by CPU and by memory, grouped by name, the next forty under *More* with its count. Each row's cross force-quits every process of that name, without the interview; it acts on the processes named when pressed, each re-identified first, so a reordering list cannot send the wrong guest to the door. Crosses are greyed for other users' processes and for `loginwindow`, `launchd` and `WindowServer`, whose departure ends the session. The open list refreshes each second from a separate thread.
+2. **The Network**: upload above, download below, every 500 ms, counting physical interfaces (`en*`) only, so a VPN cannot claim traffic twice. A click lists each process's current and total traffic both ways, busiest first, the rest under *More*, fed by `nettop` each second while open; until fresh figures arrive, old rows show with a dash for rates, yesterday's gossip not being passed off as today's.
 
-1. **The Constitution**: CPU load above, memory in use below (reckoned as Activity Monitor reckons *Memory Used*), refreshed each second. CPU at 85% or more, or memory at 90% or more, appears in red. A click upon it produces a list of the principal offenders, the five processes consuming the most CPU and the five holding the most resident memory, each grouped by name, with the next forty of the lesser culprits folded into a *More* submenu that announces exactly how many it holds. Beside every one of them stands a small cross: a press upon it ends every process of that name forthwith, as Activity Monitor's *Force Quit* would, though without the interview. The cross acts upon the processes the row named at the instant it was pressed, and each is identified afresh before the blow falls, so that a list reordering itself beneath the finger cannot send the wrong guest to the door. A process belonging to another user wears its cross greyed, being beyond one's jurisdiction, and so do `loginwindow`, `launchd` and `WindowServer`, whose departure would take the whole session with them. The list opens upon its last reckoning and keeps itself current every second, from a separate thread, for as long as it is open.
-2. **The Network**: upload above, download below, each preceded by its arrow, refreshed every 500 ms. Only physical interfaces (`en*`) are counted, so that a VPN tunnel is not permitted to claim the same traffic twice. A click opens a register of every process presently making use of the line, with what each is receiving and sending at this moment and what it has received and sent in total, the most garrulous first and the remainder folded under *More*. The register is kept, through `nettop`, only while it is open, and refreshed every second; until its first fresh report arrives, the rows of the previous visit are shown with their present rates as a dash, yesterday's gossip not being passed off as today's.
+   ![The Network opened: per process, rates now and totals, busiest first](docs/network.png)
 
-   ![The Network opened: per process, the download and upload rates now and the totals, the busiest first](docs/network.png)
+3. **The Ping**: round-trip to `8.8.8.8` above, Wi-Fi quality below (−100 dBm = 0%, −50 dBm or better = 100%), each second, via capybar's own ICMP socket. No reply within a second, or one over 150 ms, turns the ping red, as one raises an eyebrow at a footman late with the tea; quality turns red below 50% or without Wi-Fi. A click lays out the connection: network, channel, band, PHY mode, signal, noise, SNR, transmit rate, security, country; interface, IPv4, IPv6, router, DNS, VPN, public address; the last minute's pings with min, average, max and losses. Clicking any figure copies it (*Copied*). macOS withholds the BSSID from an unbundled program, and capybar says so; the network name comes from `system_profiler` once per network; the public address from `api.ipify.org`, kept five minutes or until the network changes.
 
-3. **The Ping**: the round-trip time to `8.8.8.8` above, the quality of the Wi-Fi signal in percent below (−100 dBm counting as 0%, −50 dBm and better as 100%), both taken once a second, the ping through capybar's own ICMP socket rather than by summoning `/sbin/ping` afresh each time. Should Google decline to reply within a second, or reply with a tardiness exceeding 150 ms, the upper figure is rendered in red, as one might raise an eyebrow at a footman who arrives late with the tea; the lower turns red when the quality sinks beneath 50% or the Wi-Fi has absented itself altogether. A click lays out the whole connection: the Wi-Fi network, its channel and band, PHY mode, signal, noise and their ratio, transmit rate, security and country code; the interface, local IPv4 and IPv6, router, DNS servers, VPN and public address; and the pings of the last minute, with their minimum, average, maximum and losses. Any address or figure there is copied upon a click, and acknowledges it with a brief *Copied*. macOS withholds the BSSID from a program without a bundle, and says so; the network's name, likewise withheld, is asked of `system_profiler` once for each network; the public address is asked of `api.ipify.org` and remembered for five minutes, or for as long as one remains on the same network, whichever is the shorter.
+   ![The Ping opened: Wi-Fi network, channel, signal and noise, addresses, router, DNS, VPN and the last minute's pings](docs/ping.png)
 
-   ![The Ping opened: the Wi-Fi network, channel, signal and noise, the local and public addresses, router, DNS and VPN, and the pings of the last minute](docs/ping.png)
-
-4. **The Microphone**: a microphone, crossed out and red when the default input device is muted. Only the keyboard's own microphone key changes that state; capybar remaps the key to F5 with `hidutil` (so macOS no longer pesters one about Dictation), catches it, and puts the device back at once should any application or system whim presume to alter the state the key last chose, for it listens to the device rather than inquiring after it. Each device is governed through a single control, its mute switch where that may be set and its volume otherwise, read and written alike, so that the icon never claims a silence it cannot enforce; the level a muted volume held is remembered for each device and restored when the key relents, and a device offering neither control says so when the pointer rests upon the icon. At every start and every waking from sleep the microphone is muted; at every unlock likewise, save when the key had last unmuted it and some application is listening through it at that moment, a call that has outlasted a locked screen not being silenced behind its owner's back. Each press of the key toggles the microphone, on or off.
-5. **The Capybara**, who no longer queues among the others but sits in a borderless panel laid over the menu bar's Control Center icon, which she conceals (it is thereby out of the mouse's reach, and Control Center is to be consulted through System Settings) and whose movements she follows; she walks, chews grass, reclines with her head raised to survey her estate with a red apple balanced upon it, sleeps while releasing a modest procession of *z*s, stands with dignity in the rain, and swims, the apple still in place. Eight frames a second; she is not to be hurried. To find that icon she must read the names of other programs' windows, which macOS permits only to holders of the Screen Recording permission; denied it, she takes an ordinary place in the queue among the others instead, and makes no complaint. She is, moreover, a creature of service: a left click upon her summons the iTerm2 session in which Claude Code (a process named `claude`) is already at work, or, finding none so engaged, opens a fresh window and issues the command `claude` on your behalf, or such other command as one has entrusted to her with `defaults write capybar claudeCodeCommand '…'`; where iTerm2 is not installed she merely looks up. A right click offers the *Quit* entry. The first such summons obliges macOS to ask whether `capybar` may direct iTerm2, a question one answers *Allow*, unless one prefers the life of a lighthouse keeper, whose only correspondent is the sea.
+4. **The Microphone**: crossed out and red when the default input is muted. Each press of the keyboard's microphone key toggles it, and nothing else may: capybar remaps the key to F5 with `hidutil` (ending macOS's Dictation prompts), catches it, and listens to the device, restoring at once any state another party alters. Each device is governed through one control, its mute switch where settable, else its volume, so the icon never claims a silence it cannot enforce; a muted volume's level is remembered per device and restored, and a device with neither control says so in the tooltip. The microphone is muted at every start, wake and unlock, unless at unlock the key last unmuted it and an application is listening, a call that outlasted a locked screen not being silenced behind its owner's back.
+5. **The Capybara** sits in a borderless panel over the Control Center icon, hiding it (Control Center is then reached through System Settings) and following it. She walks, chews grass, reclines with a red apple on her head, sleeps in a procession of *z*s, stands in the rain and swims, apple in place, at eight frames a second; she is not to be hurried. Finding that icon requires Screen Recording; denied it, she queues among the others without complaint. A left click brings forward the iTerm2 session running Claude Code (process `claude`), or opens a window running `claude`, or the command set with `defaults write capybar claudeCodeCommand '…'`; without iTerm2 she merely looks up. A right click offers *Quit*. On the first summons macOS asks whether `capybar` may control iTerm2; answer *Allow*, unless one prefers the life of a lighthouse keeper, whose only correspondent is the sea.
 
 ## II. Of Installation, Which Requires No Great Talent
 
-You shall require macOS and the Swift compiler that arrives with the Xcode Command Line Tools. Those who possess neither are respectfully advised to take up the restoration of antique barometers, a pursuit that likewise concerns itself with pressure, though at a far more forgiving pace.
+You require macOS and the Swift compiler of the Xcode Command Line Tools. Those lacking both are advised to take up antique barometers, which likewise concern pressure, at a more forgiving pace.
 
 ```bash
 git clone https://github.com/illinifellow/capybar.git
@@ -52,72 +50,70 @@ cd capybar
 ./install.sh
 ```
 
-`install.sh` compiles every file in `Sources/` beside `~/.local/bin/capybar`, signs the result, and only then puts it in the old binary's place, so that a failed build leaves the household exactly as it was; it then registers the launchd agent `com.illinifellow.capybar`, which starts at login and returns of its own accord should it ever leave without permission (a crash, that is; a deliberate *Quit* is respected). To apply a change, run it again; it rebuilds and restarts without further ceremony. Given a version, as in `./install.sh 0.2.0`, it declines to install a build that reports any other.
+`install.sh` builds `Sources/` beside `~/.local/bin/capybar`, signs it, and only then replaces the old binary, so a failed build changes nothing. It registers the launchd agent `com.illinifellow.capybar`, which starts at login and returns after a crash (a deliberate *Quit* is respected). Rerun it to rebuild and restart; `./install.sh 0.2.0` refuses a build reporting any other version.
 
-When a newer release has been published, every menu shows an *Update to X.Y.Z* entry beside *Quit*. A click upon it fetches that release and runs the release's own `install.sh`, asking for exactly that version, so that the binary and the launch agent are renewed by the very routine a fresh installation uses; should any step before the replacement fail, the old capybar stays where it was and a notice says which step declined. The household looks for such releases at start and every six hours. Any alterations one has made to the sources by hand are, naturally, replaced along with everything else.
+A newer release puts *Update to X.Y.Z* beside *Quit* in every menu. It fetches that release and runs its `install.sh` for exactly that version; if a step before the replacement fails, the old capybar stays and a notice names the step. Releases are checked at start and every six hours. Hand alterations to the sources are, naturally, replaced.
 
-To dismiss the household entirely, together with its key remaps, its preferences and whatever earlier versions left lying about:
+To dismiss the household, its key remaps, preferences and earlier versions' leavings:
 
 ```bash
 ./uninstall.sh
 ```
 
-The *Quit* entry in the menu of any item (on the capybara, the right-click menu) closes the whole household together, as befits a household that dines as one, and returns the microphone and moon keys to macOS on its way out; logging out does the same. They return at the next login.
+*Quit* in any item's menu (the capybara's right-click menu) closes the whole household, which dines as one, and returns the microphone and moon keys to macOS; logging out does the same. They return at the next login.
 
 ## III. Of Certain Services Rendered Without Ceremony
 
-- **Cmd+\\** summons the macOS screenshot toolbar, poised upon a selected area, and commits the result to the clipboard; **Cmd+Shift+\\** does likewise but delivers the result to Preview, the file itself being kept in the temporary directory that macOS sweeps on its own. capybar requires the Screen Recording permission for it; without that permission macOS hands back captures holding nothing but the wallpaper. The system's own screenshot shortcuts must be left on their defaults, lest they claim the backslash first.
-- The moon key (Do Not Disturb) is remapped to F6 and toggles Do Not Disturb by running the Shortcuts shortcut «Toggle Do Not Disturb», which must first be imported once from `extras/Toggle Do Not Disturb.shortcut` (open it and press *Add Shortcut*); macOS offers no public means of switching Focus otherwise. A key held down counts once, here as for every key capybar keeps.
-- These keys are claimed for every application while capybar runs: Cmd+\\, Cmd+Shift+\\, and plain F5 and F6, which the microphone and moon keys become. Whoever relies upon them elsewhere is advised to make other arrangements.
-- `install.sh` signs the binary with a code-signing identity named `capybar local signing` when the keychain holds one, so that macOS remembers the permissions above across rebuilds.
+- **Cmd+\\** opens the screenshot toolbar on a selected area and copies the result; **Cmd+Shift+\\** sends it to Preview, the file left in the temporary directory macOS sweeps. Without Screen Recording permission captures hold only the wallpaper. The system screenshot shortcuts must stay on their defaults, lest they claim the backslash first.
+- The moon key becomes F6 and toggles Do Not Disturb through the shortcut «Toggle Do Not Disturb», imported once from `extras/Toggle Do Not Disturb.shortcut` (open it, press *Add Shortcut*); macOS offers no public means otherwise. A held key counts once, as for every key capybar keeps.
+- While capybar runs, Cmd+\\, Cmd+Shift+\\, F5 and F6 are its own in every application; whoever relies on them must make other arrangements.
+- `install.sh` signs with the identity `capybar local signing` when the keychain holds one, so macOS remembers these permissions across rebuilds.
 
 ## IV. Of Instructions Given from the Command Line
 
-The binary answers a few orders directly, for those who prefer a keyboard to a key:
+| Command                       | Effect                                                    |
+| ----------------------------- | --------------------------------------------------------- |
+| `capybar`                     | Runs the household (what the launchd agent does at login) |
+| `capybar --version`           | Prints the version                                        |
+| `capybar --focus-claude-code` | Does what a left click on the capybara does               |
+| `capybar --remove-key-remaps` | Returns the microphone and moon keys to macOS             |
 
-| Command                       | Effect                                                         |
-| ----------------------------- | -------------------------------------------------------------- |
-| `capybar`                     | Runs the household (what the launchd agent does at login)      |
-| `capybar --version`           | Prints the version                                             |
-| `capybar --focus-claude-code` | Does what a left click on the capybara does                    |
-| `capybar --remove-key-remaps` | Returns the microphone and moon keys to macOS (`uninstall.sh`) |
-
-Whatever capybar finds amiss it enters, without raising its voice, in the unified log, where it may be read with `log show --last 1h --predicate 'subsystem == "com.illinifellow.capybar"'`.
+Whatever capybar finds amiss it enters quietly in the unified log: `log show --last 1h --predicate 'subsystem == "com.illinifellow.capybar"'`.
 
 ## V. Of the Arrangement of the Sources
 
-| File                        | Responsibility                                                                                            |
-| --------------------------- | --------------------------------------------------------------------------------------------------------- |
-| `Sources/main.swift`        | Starts the application, admits the four items and the capybara, and answers the command line              |
-| `Sources/shared.swift`      | The Quit menu, the timers, the menu bar's label colour, the two-line inscription and the global hotkeys   |
-| `Sources/menu.swift`        | The rows, sections, crosses and Quit entry the menus share, and the timer that keeps an open menu current |
-| `Sources/command.swift`     | The running of other programs, and the log                                                                |
-| `Sources/version.swift`     | The version, declared here alone, and the comparison of versions                                          |
-| `Sources/update.swift`      | The search for a newer release and the running of its `install.sh`                                        |
-| `Sources/ping.swift`        | The ping and Wi-Fi signal item and its account of the connection                                          |
-| `Sources/icmp.swift`        | The echo request and the recognition of its reply                                                         |
-| `Sources/capybara.swift`    | The capybara, her activities, her apple, her weather and her place in the menu bar                        |
-| `Sources/claudecode.swift`  | Her errand to iTerm2 on Claude Code's behalf                                                              |
-| `Sources/network.swift`     | Interface counters and the upload and download item                                                       |
-| `Sources/system.swift`      | CPU ticks, memory statistics, and the item that reports them                                              |
-| `Sources/counters.swift`    | The arithmetic of counters that wrap or reset                                                             |
-| `Sources/format.swift`      | The writing of rates and sizes                                                                            |
-| `Sources/processes.swift`   | The sampling of processes through `ps` and `nettop`, and the force quit                                   |
-| `Sources/usage.swift`       | The reading of that sampling, the grouping by name, and the folding under More                            |
-| `Sources/microphone.swift`  | The microphone item and the guard on the mute state                                                       |
-| `Sources/mutecontrol.swift` | The choice of the control a device is muted through                                                       |
-| `Sources/keymap.swift`      | The `hidutil` remaps of the microphone and moon keys                                                      |
-| `Sources/hotkeys.swift`     | The screenshot hotkeys and the `screencapture` they summon                                                |
-| `Sources/focus.swift`       | Do Not Disturb on the moon key                                                                            |
-| `Tests/main.swift`          | The examination of everything above that can be examined without a menu bar                               |
+| File                        | Responsibility                                                             |
+| --------------------------- | -------------------------------------------------------------------------- |
+| `Sources/main.swift`        | Start-up, the four items and the capybara, the command line                |
+| `Sources/shared.swift`      | Quit menu, timers, label colour, two-line inscription, global hotkeys      |
+| `Sources/menu.swift`        | Shared rows, sections, crosses and Quit entry; the open-menu refresh timer |
+| `Sources/command.swift`     | Running other programs; the log                                            |
+| `Sources/version.swift`     | The version, declared here alone, and version comparison                   |
+| `Sources/update.swift`      | Finding a newer release and running its `install.sh`                       |
+| `Sources/ping.swift`        | The ping and Wi-Fi item and its account of the connection                  |
+| `Sources/icmp.swift`        | The echo request and its reply                                             |
+| `Sources/capybara.swift`    | The capybara, her activities, apple, weather and place in the bar          |
+| `Sources/claudecode.swift`  | Her errand to iTerm2 for Claude Code                                       |
+| `Sources/network.swift`     | Interface counters and the upload and download item                        |
+| `Sources/system.swift`      | CPU ticks, memory statistics and their item                                |
+| `Sources/counters.swift`    | Counters that wrap or reset                                                |
+| `Sources/format.swift`      | Rates and sizes                                                            |
+| `Sources/processes.swift`   | Sampling through `ps` and `nettop`; the force quit                         |
+| `Sources/usage.swift`       | Reading the samples, grouping by name, folding under More                  |
+| `Sources/microphone.swift`  | The microphone item and the mute guard                                     |
+| `Sources/mutecontrol.swift` | Choosing the control a device is muted through                             |
+| `Sources/keymap.swift`      | The `hidutil` remaps of the microphone and moon keys                       |
+| `Sources/hotkeys.swift`     | Screenshot hotkeys and their `screencapture`                               |
+| `Sources/focus.swift`       | Do Not Disturb on the moon key                                             |
+| `Tests/main.swift`          | Tests of everything that needs no menu bar                                 |
 
-Thresholds, refresh intervals and the host to be pinged are declared as constants at the head of each file. One alters them there, and nowhere else, then runs `./install.sh`; the next update, being built from the published sources, will undo the alteration with perfect courtesy.
+Thresholds, intervals and the ping host are constants at the head of each file. Alter them there, run `./install.sh`, and the next update, built from the published sources, will undo the alteration with perfect courtesy.
 
 ## VI. Of Improvements, and the Proper Manner of Proposing Them
 
-Every change begins as an issue, a [bug report](https://github.com/illinifellow/capybar/issues/new?template=bug_report.yml) or a [feature request](https://github.com/illinifellow/capybar/issues/new?template=feature_request.yml). The work for an issue proceeds upon its own branch, taken from `develop`, and arrives by a pull request into `develop` that closes it; the branch is removed upon merging, as a guest's coat is returned at the door. Releases gather `develop` into `master` under a tag bearing the version, without the vulgar «v»; that version is the one declared in `Sources/version.swift`, and the continuous integration refuses both a pull request into `master` that fails to raise it and a tag that disagrees with it.
+Every change begins as a [bug report](https://github.com/illinifellow/capybar/issues/new?template=bug_report.yml) or a [feature request](https://github.com/illinifellow/capybar/issues/new?template=feature_request.yml), proceeds on a branch from `develop`, and arrives by a pull request into `develop` that closes it; the branch is removed on merge, as a guest's coat is returned at the door. Releases merge `develop` into `master` under a tag of the version in `Sources/version.swift`, without the vulgar «v»; CI refuses a pull request into `master` that does not raise it, and a tag that disagrees.
 
-To build without installing, and to examine the result, as the continuous integration does:
+To build and test without installing, as CI does:
 
 ```bash
 mkdir -p .build
@@ -127,4 +123,4 @@ swiftc $(ls Sources/*.swift | grep -v main.swift) Tests/main.swift -o .build/tes
 
 ## VII. Of Licence
 
-MIT. You may do with it very nearly as you please, provided you do not mistake the capybara for a hippopotamus in polite company.
+MIT. Do with it very nearly as you please, provided you do not mistake the capybara for a hippopotamus in polite company.
