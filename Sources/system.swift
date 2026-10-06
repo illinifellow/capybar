@@ -1,5 +1,6 @@
 /// System item: CPU load above RAM use every second; a value at or over its critical
-/// threshold is drawn in red. Clicking shows the processes using the most CPU and memory.
+/// threshold is drawn in red. Clicking shows the processes using the most CPU and memory, each
+/// of which can be force quit from there.
 import AppKit
 
 private let SYSTEM_REFRESH_SECONDS = 1.0
@@ -36,18 +37,41 @@ private func readRamPercent() -> Double {
 
 private var systemItem: NSStatusItem?
 
-/// Rebuilds the drop-down each time it opens: the processes using the most CPU and the
-/// most memory, the rest folded into "More".
+/// The drop-down: the processes using the most CPU and the most memory, the rest folded into
+/// "More", each with a cross that force quits it. Built when it opens, refreshed in place every
+/// second while open and right after a force quit.
 private final class SystemMenuDelegate: NSObject, NSMenuDelegate {
+    private var cpuSection: MenuSection?
+    private var memorySection: MenuSection?
+    private let timer = OpenMenuTimer()
+
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
-        let usage = readProcessUsage()
-        appendTopSection(to: menu, title: "CPU (100% = one core)", rows: usage.filter { $0.cpuPercent >= 0.1 }.sorted { $0.cpuPercent > $1.cpuPercent }.map { ($0.name, String(format: "%.1f%%", $0.cpuPercent)) })
+        let refresh: () -> Void = { [weak self] in self?.refreshInBackground() }
+        cpuSection = MenuSection(in: menu, title: "CPU (100% = one core)", folds: true, onKill: refresh)
         menu.addItem(.separator())
-        appendTopSection(to: menu, title: "Memory", rows: usage.sorted { $0.memoryBytes > $1.memoryBytes }.map { ($0.name, formatBytes($0.memoryBytes)) })
-        menu.addItem(.separator())
-        menu.addItem(withTitle: "Red at CPU ≥ \(Int(CPU_CRITICAL_PERCENT))%, RAM ≥ \(Int(RAM_CRITICAL_PERCENT))%", action: nil, keyEquivalent: "")
+        memorySection = MenuSection(in: menu, title: "Memory", folds: true, onKill: refresh)
         appendQuit(to: menu)
+        show(readProcessUsage())
+    }
+
+    func menuWillOpen(_ menu: NSMenu) { timer.start { [weak self] in self?.refreshInBackground() } }
+
+    func menuDidClose(_ menu: NSMenu) { timer.stop() }
+
+    /// Samples `ps` off the main thread and shows the result.
+    private func refreshInBackground() {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let usage = readProcessUsage()
+            RunLoop.main.perform(inModes: [.common]) { [weak self] in self?.show(usage) }
+        }
+    }
+
+    private func show(_ usage: [ProcessUsage]) {
+        cpuSection?.update(usage.filter { $0.cpuPercent >= 0.1 }.sorted { $0.cpuPercent > $1.cpuPercent }
+            .map { MenuRow(name: $0.name, values: [String(format: "%.1f%%", $0.cpuPercent)], kill: .button($0.killableProcessIds)) })
+        memorySection?.update(usage.sorted { $0.memoryBytes > $1.memoryBytes }
+            .map { MenuRow(name: $0.name, values: [formatBytes($0.memoryBytes)], kill: .button($0.killableProcessIds)) })
     }
 }
 
@@ -63,16 +87,13 @@ func startSystemLoad() {
     item.menu = menu
     systemItem = item
     var previousTicks = readCpuTicks()
-    Timer.scheduledTimer(withTimeInterval: SYSTEM_REFRESH_SECONDS, repeats: true) { _ in
+    scheduleRepeatingTimer(every: SYSTEM_REFRESH_SECONDS) { _ in
         let ticks = readCpuTicks()
         let total = Double(ticks.total &- previousTicks.total)
         let cpu = total > 0 ? Double(ticks.busy &- previousTicks.busy) / total * 100 : 0
         previousTicks = ticks
         let ram = readRamPercent()
-        item.button?.image = makeTwoLineImage(
-            top: "CPU \(Int(cpu.rounded()))%", topCritical: cpu >= CPU_CRITICAL_PERCENT,
-            bottom: "RAM \(Int(ram.rounded()))%", bottomCritical: ram >= RAM_CRITICAL_PERCENT,
-            widest: "CPU 100%", foreground: labelColor(of: item)
-        )
+        showTwoLines(on: item, top: "CPU \(Int(cpu.rounded()))%", topCritical: cpu >= CPU_CRITICAL_PERCENT,
+                     bottom: "RAM \(Int(ram.rounded()))%", bottomCritical: ram >= RAM_CRITICAL_PERCENT, widest: "CPU 100%")
     }.fire()
 }

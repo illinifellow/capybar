@@ -34,26 +34,34 @@ func formatRate(_ bytesPerSecond: Double) -> String {
 
 private var networkItem: NSStatusItem?
 
-/// Fills the drop-down when it opens: a "measuring" line first, then, after a one-second
-/// `nettop` sample taken off the main thread, the processes moving the most traffic.
+/// The drop-down: the processes moving the most traffic, each with its download and upload rate
+/// over the last second and the bytes it has received and sent in all. A streaming `nettop`
+/// runs only while the menu is open and refreshes the rows in place every second; the menu
+/// opens with the rows it last showed.
 private final class NetworkMenuDelegate: NSObject, NSMenuDelegate {
-    func menuWillOpen(_ menu: NSMenu) {
+    private var section: MenuSection?
+    private var lastSample: [ProcessUsage] = []
+    private lazy var sampler = NetworkSampler { [weak self] usage in
+        self?.lastSample = usage
+        self?.show(usage)
+    }
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
-        menu.addItem(withTitle: "Measuring for 1 second…", action: nil, keyEquivalent: "")
+        section = MenuSection(in: menu, title: "Traffic by process", columns: ["↓ Now", "↑ Now", "↓ Total", "↑ Total"], folds: true)
         appendQuit(to: menu)
-        DispatchQueue.global(qos: .userInitiated).async {
-            let usage = sampleNetworkUsage().sorted { $0.receivedBytes + $0.sentBytes > $1.receivedBytes + $1.sentBytes }
-            RunLoop.main.perform(inModes: [.common]) {
-                menu.removeAllItems()
-                let rows = usage.map { ($0.name, "↑ \(formatRate($0.sentBytes))  ↓ \(formatRate($0.receivedBytes))") }
-                if rows.isEmpty {
-                    menu.addItem(withTitle: "No traffic in the last second", action: nil, keyEquivalent: "")
-                } else {
-                    appendTopSection(to: menu, title: "Traffic by process", rows: rows)
-                }
-                appendQuit(to: menu)
-            }
-        }
+        show(lastSample)
+    }
+
+    func menuWillOpen(_ menu: NSMenu) { sampler.start() }
+
+    func menuDidClose(_ menu: NSMenu) { sampler.stop() }
+
+    private func show(_ usage: [ProcessUsage]) {
+        section?.update(usage.sorted { $0.receivedBytesPerSecond + $0.sentBytesPerSecond > $1.receivedBytesPerSecond + $1.sentBytesPerSecond }.map {
+            MenuRow(name: $0.name, values: [formatRate($0.receivedBytesPerSecond), formatRate($0.sentBytesPerSecond),
+                                           formatBytes($0.receivedBytesTotal), formatBytes($0.sentBytesTotal)])
+        })
     }
 }
 
@@ -70,13 +78,13 @@ func startNetwork() {
     networkItem = item
     var previous = readCounters()
     var previousTime = Date()
-    item.button?.image = makeTwoLineImage(top: "↑ 0 B/s", bottom: "↓ 0 B/s", widest: "↑ 999.9 MB/s", foreground: labelColor(of: item))
-    Timer.scheduledTimer(withTimeInterval: NETWORK_REFRESH_SECONDS, repeats: true) { _ in
+    showTwoLines(on: item, top: "↑ 0 B/s", bottom: "↓ 0 B/s", widest: "↑ 999.9 MB/s")
+    scheduleRepeatingTimer(every: NETWORK_REFRESH_SECONDS) { _ in
         let current = readCounters(), now = Date()
         let seconds = max(now.timeIntervalSince(previousTime), 0.001)
         let received = current.received >= previous.received ? Double(current.received - previous.received) : 0
         let sent = current.sent >= previous.sent ? Double(current.sent - previous.sent) : 0
-        item.button?.image = makeTwoLineImage(top: "↑ " + formatRate(sent / seconds), bottom: "↓ " + formatRate(received / seconds), widest: "↑ 999.9 MB/s", foreground: labelColor(of: item))
+        showTwoLines(on: item, top: "↑ " + formatRate(sent / seconds), bottom: "↓ " + formatRate(received / seconds), widest: "↑ 999.9 MB/s")
         previous = current
         previousTime = now
     }
