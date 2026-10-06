@@ -1,5 +1,6 @@
 # capybar
 
+<!-- cover: docs/screenshot.png -->
 <!-- date: 2026-10-06T02:00:00Z -->
 
 **A capybara and her retinue in the macOS menu bar: CPU and memory, network throughput, ping and Wi-Fi, and the microphone.**
@@ -10,6 +11,8 @@
 [![Buy me a coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-ffdd04?logo=buymeacoffee&logoColor=000)](https://buymeacoffee.com/illinifellow)
 
 ![capybar in the macOS menu bar, enlarged three times: CPU and memory, upload and download, ping and Wi-Fi quality, the muted microphone among the system icons, and the capybara beside the clock](docs/menubar.png)
+
+![The system item open: the five processes using the most CPU and the five holding the most memory, the rest folded under More](docs/screenshot.png)
 
 *Being a Brief and Respectful Account of a Small Rodent of Quality, Lately Elevated to the macOS Menu Bar, Together with Such Instruments of Measurement as Befit Her Retinue.*
 
