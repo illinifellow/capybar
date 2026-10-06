@@ -103,6 +103,10 @@ private func describe(_ mode: CWPHYMode) -> String {
     case .mode11n: return "802.11n (Wi-Fi 4)"
     case .mode11ac: return "802.11ac (Wi-Fi 5)"
     case .mode11ax: return "802.11ax (Wi-Fi 6)"
+    #if compiler(>=6.2)
+    // Wi-Fi 7 arrived in the macOS 26 SDK, which ships with Swift 6.2.
+    case .mode11be: return "802.11be (Wi-Fi 7)"
+    #endif
     case .modeNone: return "None"
     @unknown default: return "802.11 (mode \(mode.rawValue))"
     }
