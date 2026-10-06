@@ -1,5 +1,7 @@
 # capybar
 
+<!-- cover: docs/cover.png -->
+
 **A capybara and her retinue in the macOS menu bar: CPU and memory, network throughput, ping and Wi-Fi, and the microphone.**
 
 [![CI](https://img.shields.io/github/actions/workflow/status/illinifellow/capybar/ci.yml?label=CI)](https://github.com/illinifellow/capybar/actions/workflows/ci.yml)
@@ -87,5 +89,3 @@ swiftc -O Sources/*.swift -o .build/capybar
 ## VII. Of Licence
 
 MIT. You may do with it very nearly as you please, provided you do not mistake the capybara for a hippopotamus in polite company.
-
-<img data-cover alt="capybar as an isometric line drawing: the menu bar with its readouts and the capybara standing on it with an apple on her head" src="docs/cover.png" />
