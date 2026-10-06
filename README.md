@@ -12,15 +12,13 @@
 
 ![The Constitution opened: the five processes using the most CPU and the five holding the most memory, each with a cross that ends it at once, the rest folded under More](docs/cpu.png)
 
-The menu bar, the one strip never out of sight, is squandered on matters consulted twice a day. A gentleman at work wishes to know at a glance whether the machine labours and for whom, whether the network moves, who is to blame for a slow line, and whether the microphone is silent. Each answer meant opening a window; existing utilities came as dashboards with a subscription, as though one had asked the time and been sold a clock tower.
-
-Hence four readings, red only when something matters; a click that names the culprit; a microphone obeying its own key alone; nothing to configure. Plain-text figures made the bar fidget, so each is a fixed-width image. The microphone, altered without leave by applications and macOS, is now held by capybar and restored the instant anyone touches it. The capybara came last and declined to leave: a bar of gauges is a cockpit, one calm rodent makes it a home.
+The menu bar is never out of sight, yet it is spent on matters consulted twice a day. capybar puts there what a gentleman at work actually glances at: the load on the machine, the traffic, the line and the microphone, each red only when it matters and each naming the culprit upon a click. The capybara came last and declined to leave.
 
 ![The Ping opened: Wi-Fi network, channel, signal and noise, addresses, router, DNS, VPN and the last minute's pings](docs/ping.png)
 
 ## Of How the Thing Is Built
 
-One native Swift program, four status items and a panel, admitted at login by a launch agent. It reads the system without intermediaries: the kernel's processor tally, memory as Activity Monitor reckons it, physical-interface traffic, its own ICMP ping and Wi-Fi strength each second, redrawing only what changed. The microphone and moon keys are remapped with `hidutil` beside the owner's own remaps, and handed back when capybar withdraws.
+One native Swift program with four status items and a panel, admitted at login by a launch agent, reading the system directly and redrawing only what changed.
 
 *Being a Brief and Respectful Account of a Small Rodent of Quality, Lately Elevated to the macOS Menu Bar, Together with Such Instruments of Measurement as Befit Her Retinue.*
 
