@@ -4,8 +4,8 @@
 /// and the moon key (remapped to F5 and F6 for the session), and offers its own update when a
 /// newer release exists. Installed by install.sh as the launchd agent BUNDLE_IDENTIFIER.
 ///
-/// Arguments: `--version` prints the version; `--focus-claude-code` does what a click on the
-/// capybara does; `--remove-key-remaps` takes the key remaps out (uninstall.sh). Each exits.
+/// Arguments: `--version` prints the version; `--focus-claude-code` does what Claude Code in the
+/// capybara's menu does; `--remove-key-remaps` takes the key remaps out (uninstall.sh). Each exits.
 import AppKit
 
 private let ARGUMENT_ACTIONS: [String: () -> Void] = [

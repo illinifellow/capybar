@@ -6,7 +6,8 @@
 /// and follows. That icon is a window of Control Center (bundle CONTROL_CENTER_BUNDLE_IDENTIFIER)
 /// named CONTROL_CENTER_ICON_WINDOW, and macOS reveals other programs' window names only with the
 /// Screen Recording permission; without it she lives in an ordinary status item instead. A left
-/// click brings Claude Code forward (`claudecode.swift`), a right click shows Quit.
+/// click opens or closes the camera mirror (`mirror.swift`); a right click shows Claude Code,
+/// which brings Claude Code forward (`claudecode.swift`), and Quit.
 import AppKit
 
 private let ITEM_SIZE = NSSize(width: 30, height: 18)
@@ -159,10 +160,32 @@ private func advance(_ pose: inout Pose) {
     }
 }
 
+/// Rebuilds the capybara's right-click menu each time it opens: Claude Code, then Quit and the update entry.
+@MainActor private final class CapybaraMenuDelegate: NSObject, NSMenuDelegate {
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems()
+        let claudeCode = NSMenuItem(title: "Claude Code", action: #selector(focusClaudeCodePressed), keyEquivalent: "")
+        claudeCode.target = self
+        menu.addItem(claudeCode)
+        appendQuit(to: menu)
+    }
+
+    @objc func focusClaudeCodePressed() { requestClaudeCodeFocus() }
+}
+
+@MainActor private let capybaraMenuDelegate = CapybaraMenuDelegate()
+
+/// Builds the capybara's right-click menu. @returns The menu, filled each time it opens.
+@MainActor private func makeCapybaraMenu() -> NSMenu {
+    let menu = NSMenu()
+    menu.delegate = capybaraMenuDelegate
+    return menu
+}
+
 /// The view the capybara lives in inside the panel: draws each frame and answers clicks.
 private final class CapybaraView: NSView {
     var image: NSImage? { didSet { needsDisplay = true } }
-    private let quitMenu = makeQuitMenu()
+    private let capybaraMenu = makeCapybaraMenu()
 
     override func draw(_ dirtyRect: NSRect) {
         guard let image else { return }
@@ -170,18 +193,18 @@ private final class CapybaraView: NSView {
                               width: image.size.width, height: image.size.height))
     }
 
-    override func mouseUp(with event: NSEvent) { requestClaudeCodeFocus() }
-    override func rightMouseUp(with event: NSEvent) { NSMenu.popUpContextMenu(quitMenu, with: event, for: self) }
+    override func mouseUp(with event: NSEvent) { toggleMirror() }
+    override func rightMouseUp(with event: NSEvent) { NSMenu.popUpContextMenu(capybaraMenu, with: event, for: self) }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
 
 /// Receives clicks on the status item the capybara uses without Screen Recording.
 @MainActor private final class CapybaraItemTarget: NSObject {
-    private let quitMenu = makeQuitMenu()
+    private let capybaraMenu = makeCapybaraMenu()
 
     @objc func clicked(_ sender: NSStatusBarButton) {
         guard let event = NSApp.currentEvent else { return }
-        if event.type == .rightMouseUp { NSMenu.popUpContextMenu(quitMenu, with: event, for: sender) } else { requestClaudeCodeFocus() }
+        if event.type == .rightMouseUp { NSMenu.popUpContextMenu(capybaraMenu, with: event, for: sender) } else { toggleMirror() }
     }
 }
 
