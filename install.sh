@@ -21,7 +21,8 @@ built="$(mktemp "$(dirname "$binary")/.capybar-build.XXXXXX")"
 staged_plist="$(mktemp "$(dirname "$plist")/.$label.XXXXXX")"
 trap 'rm -f "$built" "$staged_plist"' EXIT
 # The embedded Info.plist carries the camera usage description macOS requires before it lets an
-# unbundled program ask for the camera (the capybara's mirror).
+# unbundled program ask for the camera (the capybara's mirror). It holds no CFBundleIdentifier:
+# one would move UserDefaults from the domain `capybar` to that identifier.
 swiftc -O "$root"/Sources/*.swift -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker "$root/Info.plist" -o "$built"
 # macOS keeps privacy permissions (Screen Recording, Automation) only while the signature
 # stays the same; an ad-hoc signature changes on every build. A code-signing identity named
