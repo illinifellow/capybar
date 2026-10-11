@@ -14,7 +14,7 @@ jobs:
         with:
           fetch-depth: 0
       - name: Build
-        run: mkdir -p .build && swiftc -O -warnings-as-errors Sources/*.swift -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker Info.plist -o .build/capybar
+        run: mkdir -p .build && swiftc -O -warnings-as-errors Sources/*.swift -o .build/capybar
       - name: Type-check in Swift 6 mode
         run: swiftc -swift-version 6 -typecheck Sources/*.swift
       - name: Test
