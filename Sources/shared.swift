@@ -105,31 +105,63 @@ enum Hotkey: UInt32 {
     case doNotDisturb = 11
 }
 
-@MainActor private var hotkeyHandlers: [UInt32: () -> Void] = [:]
+/// How long a key must stay down before a hotkey's hold action runs instead of its press action.
+private let HOTKEY_HOLD_DELAY: TimeInterval = 0.5
+
+/// What a hotkey does: `press` on a press, or, when `hold` is given, `press` on a release before
+/// HOTKEY_HOLD_DELAY and `hold` once the key stays down that long.
+private struct HotkeyActions {
+    let press: @MainActor () -> Void
+    let hold: (@MainActor () -> Void)?
+}
+
+@MainActor private var hotkeyActions: [UInt32: HotkeyActions] = [:]
 @MainActor private var heldHotkeys: Set<UInt32> = []
+/// Hold timers of the hotkeys held down now, until they fire or the key is released.
+@MainActor private var holdTimers: [UInt32: Timer] = [:]
 @MainActor private var hotkeyEventHandlerInstalled = false
 
-/// Dispatches a Carbon hotkey event: a press runs the hotkey's handler unless the key is
-/// already held (key repeat sends further presses), a release ends the hold.
+/// Dispatches a Carbon hotkey event. A press (key repeat sends further presses, ignored while the
+/// key is held) runs the press action, or starts the hold timer for a hotkey with a hold action;
+/// a release ends the hold and runs the press action if the timer has not fired yet.
 /// @param event The hotkey event. @returns noErr.
 @MainActor private func handleHotkeyEvent(_ event: EventRef?) -> OSStatus {
     var identifier = EventHotKeyID()
     GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID), nil,
                       MemoryLayout<EventHotKeyID>.size, nil, &identifier)
+    let id = identifier.id
+    guard let actions = hotkeyActions[id] else { return noErr }
     if GetEventKind(event) == UInt32(kEventHotKeyReleased) {
-        heldHotkeys.remove(identifier.id)
-    } else if heldHotkeys.insert(identifier.id).inserted {
-        hotkeyHandlers[identifier.id]?()
+        heldHotkeys.remove(id)
+        if let timer = holdTimers.removeValue(forKey: id) {
+            timer.invalidate()
+            actions.press()
+        }
+    } else if heldHotkeys.insert(id).inserted {
+        guard let hold = actions.hold else {
+            actions.press()
+            return noErr
+        }
+        let timer = Timer(timeInterval: HOTKEY_HOLD_DELAY, repeats: false) { _ in
+            MainActor.assumeIsolated {
+                holdTimers.removeValue(forKey: id)
+                hold()
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        holdTimers[id] = timer
     }
     return noErr
 }
 
 /// Registers a system-wide hotkey through Carbon `RegisterEventHotKey`; one application event
-/// handler dispatches every registered hotkey. Holding the key runs the handler once. A
+/// handler dispatches every registered hotkey. Holding the key runs one action once. A
 /// combination another program already holds is logged.
 /// @param hotkey Which hotkey. @param keyCode Virtual key code. @param modifiers Carbon modifier mask (`cmdKey`, `shiftKey`, 0 for none).
-/// @param handler Runs on the main thread when pressed.
-@MainActor func registerGlobalHotkey(_ hotkey: Hotkey, keyCode: UInt32, modifiers: UInt32, handler: @escaping () -> Void) {
+/// @param hold Runs instead of `handler` once the key stays down HOTKEY_HOLD_DELAY; nil runs `handler` at once on the press.
+/// @param handler Runs on the main thread on a press (on the release, when `hold` is given).
+@MainActor func registerGlobalHotkey(_ hotkey: Hotkey, keyCode: UInt32, modifiers: UInt32, hold: (@MainActor () -> Void)? = nil,
+                                     handler: @escaping @MainActor () -> Void) {
     if !hotkeyEventHandlerInstalled {
         var eventTypes = [EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed)),
                           EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyReleased))]
@@ -137,7 +169,7 @@ enum Hotkey: UInt32 {
         InstallEventHandler(GetApplicationEventTarget(), { _, event, _ in MainActor.assumeIsolated { handleHotkeyEvent(event) } }, eventTypes.count, &eventTypes, nil, nil)
         hotkeyEventHandlerInstalled = true
     }
-    hotkeyHandlers[hotkey.rawValue] = handler
+    hotkeyActions[hotkey.rawValue] = HotkeyActions(press: handler, hold: hold)
     var reference: EventHotKeyRef?
     let status = RegisterEventHotKey(keyCode, modifiers, EventHotKeyID(signature: HOTKEY_SIGNATURE, id: hotkey.rawValue), GetApplicationEventTarget(), 0, &reference)
     if status != noErr { logFailure("hotkey \(hotkey) not registered: \(status)") }

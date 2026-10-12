@@ -1,6 +1,6 @@
-/// capybar: one menu bar program with four status items, left to right CPU and RAM, network,
-/// ping, microphone (the item created first sits rightmost), and the capybara over the Control
-/// Center icon. It also owns the screenshot hotkeys Cmd+\ and Cmd+Shift+\, the microphone key
+/// capybar: one menu bar program with five status items, left to right CPU and RAM, network,
+/// ping, camera, microphone (the item created first sits rightmost), and the capybara over the
+/// Control Center icon. It also owns the screenshot hotkeys Cmd+\ and Cmd+Shift+\, the microphone key
 /// and the moon key (remapped to F5 and F6 for the session), and offers its own update when a
 /// newer release exists. Installed by install.sh as the launchd agent BUNDLE_IDENTIFIER.
 ///
@@ -38,6 +38,7 @@ MainActor.assumeIsolated {
     terminationSignal.setEventHandler { MainActor.assumeIsolated { NSApplication.shared.terminate(nil) } }
     terminationSignal.resume()
     startMicrophone()
+    startCamera()
     startCapybara()
     startPing()
     startNetwork()

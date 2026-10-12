@@ -4,7 +4,8 @@
 /// and the Mac waking from sleep always mute it; unlocking the screen mutes it too, unless some
 /// application is capturing from the device (a call that outlived the lock) and the key had
 /// unmuted it. The key (consumer usage 0xCF, dictation) is remapped to F5 (`keymap.swift`), so
-/// macOS no longer offers Dictation, and F5 is caught as a global hotkey.
+/// macOS no longer offers Dictation, and F5 is caught as a global hotkey: a short press toggles
+/// the microphone, holding it toggles video in the call (`camera.swift`).
 ///
 /// Each device is muted through the one control `chooseMicrophoneControl` picks (a mute switch,
 /// else the volume, on the main element or on every channel), read and written alike, and
@@ -268,7 +269,7 @@ private func deviceName(_ device: AudioDeviceID) -> String {
 @MainActor private var microphoneGuard: MicrophoneGuard?
 
 /// Adds the microphone item, mutes the microphone (again on every wake from sleep, and on
-/// unlock unless a call holds it), and registers F5 to toggle it.
+/// unlock unless a call holds it), and registers F5: a press toggles it, a hold toggles call video.
 @MainActor func startMicrophone() {
     let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     item.menu = makeQuitMenu()
@@ -287,5 +288,5 @@ private func deviceName(_ device: AudioDeviceID) -> String {
     DistributedNotificationCenter.default().addObserver(forName: SCREEN_UNLOCKED_NOTIFICATION, object: nil, queue: .main) { _ in
         MainActor.assumeIsolated { guardian.muteUnlessInUse() }
     }
-    registerGlobalHotkey(.microphone, keyCode: MICROPHONE_KEY_CODE, modifiers: 0) { guardian.toggle() }
+    registerGlobalHotkey(.microphone, keyCode: MICROPHONE_KEY_CODE, modifiers: 0, hold: toggleCallVideo) { guardian.toggle() }
 }

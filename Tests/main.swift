@@ -176,5 +176,16 @@ results.expect(claudeCodeTerminal(among: ["/dev/ttys005", "/dev/ttys001", "/dev/
 results.expect(claudeCodeTerminal(among: ["/dev/ttys001"], processes: processes, processName: "claude") == nil, "no session runs it")
 results.expect(appleScriptStringLiteral("say \"hi\" \\ bye") == "\"say \\\"hi\\\" \\\\ bye\"", "commands are escaped for AppleScript")
 
+// MARK: Call video
+// Holding the microphone key must press the shortcut in the call that holds the microphone: a
+// call in Chrome is captured by a helper process, and a lookalike identifier is someone else.
+
+results.expect(callApplication(capturing: ["com.apple.CoreSpeech", "com.google.Chrome.helper"], among: CALL_APPLICATIONS)?.bundleIdentifier == "com.google.Chrome",
+               "a browser helper capturing audio counts as the browser")
+results.expect(callApplication(capturing: ["com.google.Chrome", "us.zoom.xos"], among: CALL_APPLICATIONS)?.bundleIdentifier == "us.zoom.xos",
+               "a dedicated call application wins over a browser")
+results.expect(callApplication(capturing: ["com.google.Chromeless", "net.whatsapp.WhatsApp"], among: CALL_APPLICATIONS) == nil,
+               "a lookalike identifier or an unknown application is no call")
+
 print("\(results.checks - results.failures) of \(results.checks) checks passed")
 exit(results.failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE)
